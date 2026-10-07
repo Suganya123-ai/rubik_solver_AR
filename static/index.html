@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rubik's Cube Solver</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <h1>Rubik's Cube Solver</h1>
+  <p class="subtitle">Scan all 6 faces, then follow the guided moves to solve it.</p>
+
+  <div class="error-banner" id="error-banner"></div>
+
+  <!-- SCAN SCREEN -->
+  <section class="screen active" id="scan-screen">
+    <div class="face-progress" id="face-progress"></div>
+    <div class="panel">
+      <p class="instructions" id="scan-instructions">Hold the cube so this face points at the camera, then capture.</p>
+      <div class="camera-wrap" id="camera-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="grid-overlay">
+          <div></div><div></div><div></div>
+          <div></div><div></div><div></div>
+          <div></div><div></div><div></div>
+        </div>
+      </div>
+      <canvas id="capture-canvas" style="display:none;"></canvas>
+      <div class="controls">
+        <button class="primary" id="capture-btn">Capture</button>
+      </div>
+    </div>
+
+    <div class="panel" id="confirm-panel" style="display:none;">
+      <p class="instructions">Detected colors -- click any square to correct it, then confirm.</p>
+      <div class="camera-wrap" style="max-width:220px;">
+        <img id="captured-photo" alt="captured face">
+      </div>
+      <div class="grid-preview" id="grid-preview"></div>
+      <div class="palette" id="palette"></div>
+      <div class="controls">
+        <button class="secondary" id="retake-btn">Retake</button>
+        <button class="primary" id="confirm-btn">Confirm face</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- SOLVE SCREEN -->
+  <section class="screen" id="solve-screen">
+    <div class="panel">
+      <div class="progress-bar"><div class="progress-bar-fill" id="progress-fill"></div></div>
+      <div class="step-count" id="step-count"></div>
+      <div class="stage-name" id="stage-name"></div>
+
+      <div id="solved-view" style="display:none;">
+        <div class="solved-banner">&#127881; Cube solved!</div>
+        <div class="controls">
+          <button class="secondary" id="restart-btn">Scan a new cube</button>
+        </div>
+      </div>
+
+      <div id="move-view">
+        <svg id="cube-diagram" viewBox="0 0 240 180" style="display:block; margin: 0 auto;"></svg>
+        <div class="move-notation" id="move-notation"></div>
+        <div class="move-instruction" id="move-description"></div>
+        <div class="controls">
+          <button class="secondary" id="back-btn">Back</button>
+          <button class="primary" id="next-btn">Done, next move</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script src="/static/cube_diagram.js"></script>
+<script src="/static/scan.js"></script>
+<script src="/static/guide.js"></script>
+</body>
+</html>
