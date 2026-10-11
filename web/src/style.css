@@ -1,0 +1,31 @@
+:root { --cyan: #5ee6ff; --green: #3dff9a; --red: #ff4d5e; --amber: #ffb547; --ink: #e8fbff;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #000; color: var(--ink); overflow: hidden;
+  font-family: Inter, system-ui, -apple-system, sans-serif; }
+#stage { position: fixed; inset: 0; }
+/* Mirrored, filling the screen; overlays use the same mapping (src/view.ts). */
+#video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+#overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#hud { position: absolute; inset: 0; pointer-events: none; }
+
+.hud-stats { position: absolute; left: 16px; top: 16px; font: 11px var(--mono); color: var(--cyan);
+  background: rgba(4, 12, 18, .45); border: 1px solid rgba(94, 230, 255, .35); border-radius: 8px;
+  padding: 8px 10px; backdrop-filter: blur(6px); min-width: 180px; }
+.hud-stats div { display: flex; justify-content: space-between; gap: 16px; line-height: 1.6; }
+.hud-stats span { opacity: .65; letter-spacing: .08em; }
+.hud-stats b { font-weight: 600; color: var(--ink); }
+
+.hud-target { position: absolute; left: 50%; top: 50%; width: min(38vh, 40vw); aspect-ratio: 1;
+  transform: translate(-50%, -50%) scale(.96); border: 1.5px dashed rgba(94, 230, 255, .7); border-radius: 18px;
+  opacity: 0; transition: opacity .3s, transform .3s; box-shadow: 0 0 24px rgba(94, 230, 255, .15) inset; }
+.hud-target.on { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.hud-hint { position: absolute; left: 50%; bottom: 8vh; transform: translateX(-50%); padding: 10px 18px;
+  border-radius: 999px; background: rgba(4, 12, 18, .6); border: 1px solid rgba(94, 230, 255, .5);
+  font-size: 15px; opacity: 0; transition: opacity .3s; backdrop-filter: blur(6px); white-space: nowrap; }
+.hud-hint.on { opacity: 1; }
+.hud-message { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); padding: 8px 16px;
+  border-radius: 999px; background: rgba(4, 12, 18, .6); border: 1px solid rgba(255, 255, 255, .3);
+  font-size: 14px; opacity: 0; transition: opacity .3s; }
+.hud-message.on { opacity: 1; }
+@media (max-width: 640px) { .hud-hint { white-space: normal; width: calc(100% - 32px); text-align: center; } }
