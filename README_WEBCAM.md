@@ -46,23 +46,23 @@ misbehaves), `?hands=off` turns it off.
 
 ## Using it
 
-1. **Start scan** (or ). Hold the cube corner-on so three sides show; it
+1. **Start scan** (or `S`). Hold the cube corner-on so three sides show; it
    captures by itself when you hold still ("✓ Side 1 of 2 captured" + beep).
    Flip it as shown for side 2.
 2. **Check colours**: a cube net appears; highlighted stickers were unclear --
-   tap one to fix its colour, or confirm (). Then **Solve**.
+   tap one to fix its colour, or confirm (`Enter`). Then **Solve**.
 3. **Hold the cube like in the first scan.** Each move is shown as a green
    arrow on your cube, played on the ghost cube beside it, and written out by
    the side's centre colour ("Turn the blue side clockwise", looking straight
    at that side). Do it and hold still: ✓ and the next move.
 4. **Wrong move**: the hand mesh turns red, the ghost cube shows ⚠, and
    "Undo the step" shows the turn that reverses it (red-orange arrow). Undo
-   it and the same plan carries on. *New plan instead* () solves again
+   it and the same plan carries on. *New plan instead* (`N`) solves again
    from where the cube is.
 5. **Solved**: heartbeat line, confetti, and your time / moves / mistakes.
 
-Keys:  scan,  confirm/solve,  or  "I did it" (if the
-camera missed a move),  new plan,  stop.
+Keys: `S` scan, `Enter` confirm/solve, `→` or `Space` "I did it" (if the
+camera missed a move), `N` new plan, `Esc` stop.
 
 Why colours instead of letters: the webcam faces you, so the camera's
 "Front" is the side facing away from you. A side's centre colour never
