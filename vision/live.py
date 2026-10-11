@@ -2,12 +2,14 @@
 training data (with the model's current guess as a pre-label to correct)."""
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 import cv2
 import numpy as np
 
 from .detector import get_detector
+from .hands import covered_stickers, get_hand_tracker
 from .reader import read_three_faces
 
 CONFIDENT = 0.5  # below this the live view shows the guess as "unsure"
@@ -31,19 +33,28 @@ def decode_jpeg(jpeg_bytes):
     return frame
 
 
+_hand_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='hands')
+
+
 def process_frame(jpeg_bytes):
-    """JPEG bytes -> what the live view needs: corner points, confidence and
-    the 27 sampled sticker colours (all in the sent frame's pixels)."""
+    """JPEG bytes -> what the live view needs: corner points, confidence, the
+    27 sampled sticker colours, the hands and which stickers they cover (all
+    in the sent frame's pixels). Hands are found alongside the cube."""
     t0 = time.perf_counter()
     frame = decode_jpeg(jpeg_bytes)
     h, w = frame.shape[:2]
+    tracker = get_hand_tracker()
+    hands_job = _hand_pool.submit(tracker.detect, frame) if tracker else None
     found = get_detector().detect(frame)
+    hands = hands_job.result() if hands_job else []
     result = {'type': 'frame', 'width': w, 'height': h, 'keypoints': None, 'confidence': None, 'faces': None,
-              'confident': False}
+              'confident': False, 'hands': hands, 'covered': None}
     if found is not None:
         kpts, confidence = found
+        faces = read_three_faces(frame, kpts)
         result.update(keypoints=kpts.round(1).tolist(), confidence=round(confidence, 3),
-                      faces=read_three_faces(frame, kpts), confident=confidence >= CONFIDENT)
+                      faces=faces, confident=confidence >= CONFIDENT,
+                      covered=covered_stickers(kpts, hands, frame, faces))
     result['ms'] = round((time.perf_counter() - t0) * 1000, 1)
     return result
 

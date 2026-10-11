@@ -121,8 +121,10 @@ def test_scan_session_rejects_the_same_view_twice():
     for _ in range(STEADY_FRAMES):
         _feed(s, _frame(views[1]))
     for _ in range(STEADY_FRAMES):
-        st = _feed(s, _frame(views[1]))  # user didn't flip the cube
-    assert st['event'] is None and 'first view again' in st['message'] and s.view == 2
+        st = _feed(s, _frame(views[1]))  # straight after the capture: no warning yet, they're about to flip
+    assert st['event'] is None and st['message'] is None and s.view == 2
+    messages = [_feed(s, _frame(views[1]))['message'] for _ in range(6 * STEADY_FRAMES)]  # still not flipped
+    assert any(m and 'first view again' in m for m in messages) and s.view == 2
 
 
 # ---------- live protocol (scan check / accept / tracking) ----------

@@ -35,7 +35,8 @@ Settings (environment variables):
 |---|---|---|
 | `RUBIK_PORT` | `8000` | Port |
 | `RUBIK_LOG_LEVEL` | `INFO` | Python log level |
-| `RUBIK_PRELOAD` | `1` | Load the model at startup (`0` loads on the first frame; used by CI) |
+| `RUBIK_PRELOAD` | `1` | Load the models at startup (`0` loads on the first frame; used by CI) |
+| `RUBIK_HANDS` | `1` | Hand tracking (`0` turns it off; everything else works the same) |
 
 `GET /health` reports whether the model is loaded and which one.
 
@@ -47,10 +48,23 @@ Settings (environment variables):
    again.
 2. **Check.** The cube net appears. Any sticker the app is unsure about is
    outlined; tap it to confirm or pick the right color. Then *Start solving*.
-3. **Solve.** Turn the cube back to the first position. Each move is shown
-   large; do it and hold still. A correct move gets a tick. A different move
-   gets "You did U instead of L" and a new plan. *I did it* skips a move if
-   the camera can't see it.
+3. **Solve.** Turn the cube back to the first position. The next move is drawn
+   on your cube in the camera picture (the stickers that turn, outlined, and an
+   arrow showing which way), and played on a 3D copy of your cube beside it. Do
+   it and hold still; a correct move gets a tick.
+4. **Mistakes.** If you turn something else, it says what you did and shows
+   (in amber) the move that undoes it; once you've undone it, the same plan
+   carries on. More than 3 moves off, or *New plan instead*, makes a new plan
+   from wherever the cube is. Untick "After a wrong move, show me how to undo
+   it" before solving to always get a new plan instead. *I did this move*
+   skips a move if the camera can't see it.
+
+**Glasses view** (button, or press `G`; `Esc` to leave): the camera picture
+full screen with a heads-up display, as it will look through the XREAL
+glasses: the move drawn on your cube, a 3D copy of your cube floating beside
+it playing the move, progress, mistake/undo messages, and your hands traced.
+While your hands are turning the cube it shows "Turning…" and judges nothing
+until you stop; stickers a finger covers are outlined dashed and left out.
 
 Other pages: `/` is the original six-photo scanner (kept as a fallback),
 `/label` is the tool for correcting saved frames for retraining.
@@ -71,6 +85,7 @@ camera frame ─► YOLO pose (7 cube corners) ─► per-face homography ─►
 | Sticker reader | [vision/reader.py](vision/reader.py) | Maps each visible face to a square, takes the median of the middle of each cell. |
 | Live loop | [vision/live.py](vision/live.py), [vision/live_session.py](vision/live_session.py) | One `LiveClient` per WebSocket connection; holds scan and tracking state. |
 | Two-view scan | [vision/scan_session.py](vision/scan_session.py), [cube/scan.py](cube/scan.py) | Steady-hold capture and wrong-flip check. Colors are compared by hue (shading barely matters), the 48 side stickers are grouped 8 per color, centers are named from those groups (logo centers can't throw it off), then whole corner/edge pieces are matched so only real pieces come out. Unsure stickers are flagged for you to confirm. |
+| Hands | [vision/hands.py](vision/hands.py) | MediaPipe Hand Landmarker (21 points per hand, ~25 ms on CPU, run alongside YOLO): which stickers a finger covers (near a finger *and* skin-coloured, since MediaPipe also guesses fingers hidden behind the cube), and whether the hands are turning the cube. |
 | Move tracking | [vision/tracker.py](vision/tracker.py) | Scores every predicted outcome; adapts to lighting changes; "lost" after 3 s of nothing fitting. |
 | Solver | [cube/solver.py](cube/solver.py) | kociemba two-phase. The original layer-by-layer solver is kept as `solve_layer_by_layer`. |
 | Server | [main.py](main.py) | FastAPI. `/ws/live` is the live protocol, documented in [docs/PROTOCOL.md](docs/PROTOCOL.md). |
@@ -127,7 +142,8 @@ Saved frames are in `data/captures/` (not committed).
   through the stickers they move onto the visible faces.
 - One person per server connection; the server holds no state between
   connections.
-- Third-party code: [third_party/rubikscolorresolver](third_party/) (MIT).
+- Third-party code: [third_party/rubikscolorresolver](third_party/) (MIT);
+  MediaPipe and its hand model `models/hand_landmarker.task` (Apache-2.0).
   Ultralytics YOLO is AGPL-3.0: fine for internal use and this project, but
   shipping a closed product needs an Ultralytics license or a different
   detector.

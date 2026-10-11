@@ -28,6 +28,7 @@ namespace RubikSolverAR.Live
         public Image bannerBackground;
         public Image steadyFill;      // Image Type = Filled, Horizontal
         public Text statusText;       // connection + speed, small
+        public Text handsText;        // optional: "Turning…" while the hands are turning the cube
 
         [Header("Behaviour")]
         public int maxAutoRescans = 2;
@@ -71,6 +72,8 @@ namespace RubikSolverAR.Live
 
         public void Rescan() => StartScan();
         public void SkipMove() => client.SkipMove();
+        /// <summary>While undoing a mistake: give up on undoing and solve again from here.</summary>
+        public void NewPlan() => client.NewPlan();
 
         // ---------- server messages ----------
         void OnConnection(bool up)
@@ -81,6 +84,8 @@ namespace RubikSolverAR.Live
 
         void OnFrame(JObject msg)
         {
+            // The server tracks the hands too: while they're turning the cube nothing is judged.
+            if (handsText) handsText.text = (bool?)msg["hands_busy"] == true ? "Turning… hold still when you're done" : "";
             if (msg["scan"] is JObject scan) ShowScan(scan);
             if (msg["scan_result"] is JObject result) HandleScanResult(result);
             if (msg["track"] is JObject track) ShowTrack(track);
@@ -155,11 +160,26 @@ namespace RubikSolverAR.Live
                 Steady(0);
                 return;
             }
-            Set($"Move {t["step"]} of {t["total"]}", (string)t["move"] ?? "", (string)t["description"] ?? "");
+            if (p == "undo")
+            {
+                // A wrong move: show how to turn it back, then the same plan carries on.
+                var undo = t["undo"] as JArray;
+                string then = undo != null && undo.Count == 1 && t["plan_move"] != null ? $" Then carry on with {t["plan_move"]}." : "";
+                Set(undo != null && undo.Count > 1 ? $"Undo the mistake ({undo.Count} moves)" : "Undo the mistake",
+                    (string)t["move"] ?? "", ((string)t["description"] ?? "") + then);
+                if (moveText) moveText.color = Warn;
+            }
+            else
+            {
+                Set($"Move {t["step"]} of {t["total"]}", (string)t["move"] ?? "", (string)t["description"] ?? "");
+                if (moveText) moveText.color = Color.white;
+            }
             Steady((float?)t["steady"] ?? 0, (float?)t["needed"] ?? 5);
             switch (ev)
             {
-                case "correct": Banner("✓ Correct", Good, 1.5f); break;
+                case "correct": Banner(message ?? "✓ Correct", Good, 1.5f); break;
+                case "undone": Banner(message ?? "Undone -- back on track", Good, 3); break;
+                case "replanned": Banner(message, Info, 3); break;
                 case "wrong": Banner(message, Warn, 6); break;
                 case "lost": Banner(message, Bad, 6); break;
                 case "home": Banner(message, Good, 3); break;

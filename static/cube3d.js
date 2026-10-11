@@ -66,6 +66,53 @@
   const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
   const ease = (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
 
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+  // Points (3D) of an arrow arc around the turning layer, on the side that
+  // faces `toward` (a direction to the viewer), pointing the way it turns.
+  function arcPoints(m, toward, radius) {
+    const axis = [0, 0, 0]; axis[m.axis] = 1;
+    const u = m.axis === 1 ? [0, 0, 1] : [0, 1, 0];
+    const v = cross(axis, u);  // a positive turn about the axis carries u toward v
+    const mid = Math.atan2(dot(toward, v), dot(toward, u));
+    const dir = Math.sign(m.angle);
+    const sweep = Math.abs(m.angle) > Math.PI * 0.6 ? 3.6 : 2.0;
+    const centre = scale(axis, m.side);
+    const pts = [];
+    for (let i = 0; i <= 40; i++) {
+      const t = mid + dir * (i / 40 - 0.5) * sweep;
+      pts.push(add(centre, add(scale(u, radius * Math.cos(t)), scale(v, radius * Math.sin(t)))));
+    }
+    return pts;
+  }
+
+  function strokeArrow(ctx, pts, colour, width, glow) {
+    ctx.save();
+    ctx.shadowColor = colour;
+    ctx.shadowBlur = glow;
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = width;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.stroke();
+    if (pts.length > 4) {
+      const [x1, y1] = pts[pts.length - 1], [x0, y0] = pts[pts.length - 4];
+      const a = Math.atan2(y1 - y0, x1 - x0), L = width * 3.2;
+      ctx.fillStyle = colour;
+      ctx.beginPath();
+      ctx.moveTo(x1 + Math.cos(a) * L * 0.6, y1 + Math.sin(a) * L * 0.6);
+      ctx.lineTo(x1 + Math.cos(a + 2.4) * L, y1 + Math.sin(a + 2.4) * L);
+      ctx.lineTo(x1 + Math.cos(a - 2.4) * L, y1 + Math.sin(a - 2.4) * L);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  const ARROW = '#7fe8ff', UNDO = '#ffb547';
+
   const HALF = 0.47;     // small-cube half size (gaps between them)
   const STICKER = 0.39;  // sticker half size
   const CAMERA = 11;     // camera distance, for a little perspective
@@ -88,7 +135,9 @@
     }
 
     // state: 54 face letters; faceColours: {letter: colour name}; move: e.g. "R'" or null.
-    show(state, faceColours, move) {
+    // opts.undo: the move undoes a mistake (drawn amber).
+    show(state, faceColours, move, opts = {}) {
+      this.undo = !!opts.undo;
       if (state === this.state && move === this.move) return;
       this.state = state;
       this.faceColours = faceColours || this.faceColours;
@@ -224,44 +273,110 @@
     }
 
     _arrow(ctx, m) {
-      // An arc around the turning layer, on the side facing the viewer.
-      const axis = [0, 0, 0]; axis[m.axis] = 1;
-      const u = m.axis === 1 ? [0, 0, 1] : [0, 1, 0];
-      // v = axis x u: a positive turn about the axis carries u toward v.
-      const v = [axis[1] * u[2] - axis[2] * u[1], axis[2] * u[0] - axis[0] * u[2], axis[0] * u[1] - axis[1] * u[0]];
-      const camera = this._camera();
-      const mid = Math.atan2(dot(camera, v), dot(camera, u));
-      const dir = Math.sign(m.angle);
-      const sweep = Math.abs(m.angle) > Math.PI * 0.6 ? 3.6 : 2.0;
-      const centre = scale(axis, m.side * 1.0);
-      const radius = 2.05;
-      const pts = [];
-      for (let i = 0; i <= 40; i++) {
-        const t = mid + dir * (i / 40 - 0.5) * sweep;
-        pts.push(this._project(add(centre, add(scale(u, radius * Math.cos(t)), scale(v, radius * Math.sin(t))))));
-      }
-      ctx.save();
-      ctx.shadowColor = 'rgba(90, 220, 255, 0.9)';
-      ctx.shadowBlur = this.size * 0.04;
-      ctx.strokeStyle = '#7fe8ff';
-      ctx.lineWidth = this.size * 0.022;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-      ctx.stroke();
-      const [x1, y1] = pts[pts.length - 1], [x0, y0] = pts[pts.length - 4];
-      const a = Math.atan2(y1 - y0, x1 - x0), L = this.size * 0.07;
-      ctx.fillStyle = '#7fe8ff';
-      ctx.beginPath();
-      ctx.moveTo(x1 + Math.cos(a) * L * 0.6, y1 + Math.sin(a) * L * 0.6);
-      ctx.lineTo(x1 + Math.cos(a + 2.4) * L, y1 + Math.sin(a + 2.4) * L);
-      ctx.lineTo(x1 + Math.cos(a - 2.4) * L, y1 + Math.sin(a - 2.4) * L);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
+      const pts = arcPoints(m, this._camera(), 2.05).map((p) => this._project(p));
+      strokeArrow(ctx, pts, this.undo ? UNDO : ARROW, this.size * 0.022, this.size * 0.04);
     }
   }
 
-  if (typeof window !== 'undefined') window.CubeHologram = CubeHologram;
-  if (typeof module !== 'undefined') module.exports = { applyMove, parseMove, STICKERS };
+  // ---------- the same move drawn on the camera picture ----------
+  // The 7 corner points YOLO finds (FRU, FLU, BLU, BRU, BRD, FRD, FLD), in
+  // cube units: small cubes are 1 apart, so the cube's corners are at +-1.5.
+  const CORNERS_3D = [[1, 1, 1], [-1, 1, 1], [-1, 1, -1], [1, 1, -1], [1, -1, -1], [1, -1, 1], [-1, -1, 1]]
+    .map((p) => scale(p, 1.5));
+
+  function solveLinear(A, b) {  // Gaussian elimination with partial pivoting
+    const n = b.length;
+    A = A.map((r) => r.slice()); b = b.slice();
+    for (let c = 0; c < n; c++) {
+      let piv = c;
+      for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
+      if (Math.abs(A[piv][c]) < 1e-12) return null;
+      [A[c], A[piv]] = [A[piv], A[c]]; [b[c], b[piv]] = [b[piv], b[c]];
+      for (let r = 0; r < n; r++) {
+        if (r === c) continue;
+        const f = A[r][c] / A[c][c];
+        for (let j = c; j < n; j++) A[r][j] -= f * A[c][j];
+        b[r] -= f * b[c];
+      }
+    }
+    return b.map((v, i) => v / A[i][i]);
+  }
+
+  function leastSquares(rows, rhs) {  // via the normal equations
+    const n = rows[0].length;
+    const A = [...Array(n)].map((_, i) => [...Array(n)].map((_, j) => rows.reduce((s, r) => s + r[i] * r[j], 0)));
+    const b = [...Array(n)].map((_, i) => rows.reduce((s, r, k) => s + r[i] * rhs[k], 0));
+    return solveLinear(A, b);
+  }
+
+  // A perspective camera (3x4, last entry fixed to 1) fitted to the 7 corners:
+  // the cube is close to the camera, so perspective matters. Falls back to an
+  // affine fit if that goes wrong. Returns {project(p), eye(p) -> direction
+  // from p toward the camera}.
+  function fitCamera(points2d) {
+    const rows = [], rhs = [];
+    CORNERS_3D.forEach(([X, Y, Z], i) => {
+      const [u, v] = points2d[i];
+      rows.push([X, Y, Z, 1, 0, 0, 0, 0, -u * X, -u * Y, -u * Z]); rhs.push(u);
+      rows.push([0, 0, 0, 0, X, Y, Z, 1, -v * X, -v * Y, -v * Z]); rhs.push(v);
+    });
+    const p = leastSquares(rows, rhs);
+    if (p) {
+      const P = [p.slice(0, 4), p.slice(4, 8), [p[8], p[9], p[10], 1]];
+      const project = (q) => {
+        const w = P[2][0] * q[0] + P[2][1] * q[1] + P[2][2] * q[2] + P[2][3];
+        return [0, 1].map((r) => (P[r][0] * q[0] + P[r][1] * q[1] + P[r][2] * q[2] + P[r][3]) / w);
+      };
+      const centre = solveLinear(P.map((r) => r.slice(0, 3)), P.map((r) => -r[3]));  // camera position
+      const err = Math.max(...CORNERS_3D.map((q, i) => Math.hypot(project(q)[0] - points2d[i][0], project(q)[1] - points2d[i][1])));
+      const size = Math.hypot(points2d[2][0] - points2d[5][0], points2d[2][1] - points2d[5][1]);
+      if (centre && dot(centre, [1, 1, 1]) > 0 && Math.hypot(...centre) > 3 && err < 0.08 * size) {
+        return { project, eye: (q) => sub(centre, q) };
+      }
+    }
+    // Affine fallback: the viewing direction is the same everywhere.
+    const rowsA = CORNERS_3D.map((q) => [q[0], q[1], q[2], 1]);
+    const a = leastSquares(rowsA, points2d.map((q) => q[0])), b = leastSquares(rowsA, points2d.map((q) => q[1]));
+    let toward = cross(a.slice(0, 3), b.slice(0, 3));
+    if (dot(toward, [1, 1, 1]) < 0) toward = scale(toward, -1);  // the camera sees Top, Front, Right
+    return {
+      project: (q) => [a[0] * q[0] + a[1] * q[1] + a[2] * q[2] + a[3], b[0] * q[0] + b[1] * q[1] + b[2] * q[2] + b[3]],
+      eye: () => toward,
+    };
+  }
+
+  // Draws `move` on the camera picture: the stickers that will turn, and an
+  // arrow around their layer (sweeping, so it reads as motion). keypoints:
+  // the 7 corners in canvas pixels. undo: draw it as an undo step (amber).
+  function drawMoveOnVideo(ctx, keypoints, move, opts = {}) {
+    if (!move || !keypoints || keypoints.length !== 7) return;
+    const m = parseMove(move);
+    const cam = fitCamera(keypoints);
+    const colour = opts.undo ? UNDO : ARROW;
+    const size = Math.hypot(keypoints[2][0] - keypoints[5][0], keypoints[2][1] - keypoints[5][1]);  // top to bottom
+    ctx.save();
+    for (const [p, d] of STICKERS) {  // the turning layer's visible stickers
+      if (p[m.axis] !== m.side || dot(d, cam.eye(add(p, scale(d, 0.5)))) <= 0) continue;
+      const a = d[0] ? [0, 1, 0] : [1, 0, 0], b = cross(d, a);
+      const quad = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([i, j]) =>
+        cam.project(add(add(p, scale(d, 0.5)), add(scale(a, i * 0.42), scale(b, j * 0.42)))));
+      ctx.beginPath();
+      quad.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.fillStyle = opts.undo ? 'rgba(255, 181, 71, 0.18)' : 'rgba(127, 232, 255, 0.16)';
+      ctx.fill();
+      ctx.lineWidth = Math.max(2, size * 0.008);
+      ctx.strokeStyle = colour;
+      ctx.stroke();
+    }
+    ctx.restore();
+    const centre = [0, 0, 0]; centre[m.axis] = m.side;
+    const arc = arcPoints(m, cam.eye(centre), 2.2).map(cam.project);
+    const t = ((opts.now || performance.now()) % 1400) / 1400;           // sweep, then show whole
+    const shown = arc.slice(0, Math.max(3, Math.round(arc.length * Math.min(1, t * 1.6))));
+    strokeArrow(ctx, shown, colour, Math.max(4, size * 0.03), size * 0.06);
+  }
+
+  if (typeof window !== 'undefined') { window.CubeHologram = CubeHologram; window.drawMoveOnVideo = drawMoveOnVideo; }
+  if (typeof module !== 'undefined') module.exports = { applyMove, parseMove, STICKERS, fitCamera, arcPoints };
 })();

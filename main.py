@@ -35,6 +35,9 @@ async def lifespan(_app):
                 log.info('cube detector loaded')
             except Exception:
                 log.exception('could not load the cube detector')
+            from vision.hands import get_hand_tracker
+            if get_hand_tracker() is not None:
+                log.info('hand tracker loaded')
         threading.Thread(target=preload, daemon=True).start()
     yield
 
@@ -138,8 +141,10 @@ async def live_socket(ws: WebSocket):
 @app.get('/health')
 def health():
     """For the glasses app and monitoring: is the server up and the model loaded?"""
+    from vision import hands
     from vision.detector import MODEL_PATH, _detector
-    return {'ok': True, 'model': os.path.basename(MODEL_PATH), 'model_loaded': _detector is not None}
+    return {'ok': True, 'model': os.path.basename(MODEL_PATH), 'model_loaded': _detector is not None,
+            'hands_loaded': hands._tracker is not None}
 
 
 @app.get('/label')

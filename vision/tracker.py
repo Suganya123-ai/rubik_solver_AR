@@ -28,6 +28,7 @@ STEADY_FRAMES = 5
 STEADY_SECONDS = 0.3      # and at least this long: a fast camera repeats frames
 MAX_MOVE = 0.03
 LOST_AFTER_S = 3.0
+MAX_UNDO = 3              # more mistakes than this to undo: make a new plan instead
 HOME_MESSAGE = 'Turn the cube back to the first position: Top, Front and Right toward the camera.'
 
 
@@ -41,6 +42,30 @@ def _candidates():
     return out
 
 
+def inverse(move):
+    return move if move.endswith('2') else (move[0] if move.endswith("'") else move + "'")
+
+
+def _quarter_turns(move):
+    return 2 if move.endswith('2') else (3 if move.endswith("'") else 1)
+
+
+def push_mistake(stack, move):
+    """Adds a move to the mistakes to undo, merging turns of the same face
+    (U then U is U2; U then U' cancels out)."""
+    if stack and stack[-1][0] == move[0]:
+        q = (_quarter_turns(stack.pop()) + _quarter_turns(move)) % 4
+        if q:
+            stack.append(move[0] + {1: '', 2: '2', 3: "'"}[q])
+    else:
+        stack.append(move)
+
+
+def undo_moves(stack):
+    """The moves that take the cube back to where the mistakes started."""
+    return [inverse(m) for m in reversed(stack)]
+
+
 _CANDIDATES = _candidates()
 _CAND_VISIBLE = np.stack([idx[_VISIBLE] for _, idx in _CANDIDATES])   # (n, 27) sticker sources
 
@@ -51,12 +76,20 @@ def reading_features(reading):
     return np.array([color_feature(rgb) for f in 'UFR' for rgb in reading[f]])
 
 
-def decide(state_letters, obs, refs, expected=None):
-    """Scores every candidate against the observed 27 stickers. Returns
-    (status, moves, new_letters): status 'ok' | 'unsure' | 'lost'."""
+MIN_VISIBLE = 12  # fewer stickers than this in view (hands over the rest): don't judge
+
+
+def decide(state_letters, obs, refs, expected=None, visible=None, info=None):
+    """Scores every candidate against the observed 27 stickers. visible: 27
+    bools, False for stickers a hand covers (they count for nothing). info: a
+    dict to fill with the scores (for logging). Returns (status, moves,
+    new_letters): status 'ok' | 'unsure' | 'lost'."""
     letter_idx = np.array([LETTERS.index(x) for x in state_letters])
     ref_mat = np.stack([refs[x] for x in LETTERS])                       # (6, 3)
     dist = np.minimum(np.linalg.norm(obs[:, None, :] - ref_mat[None], axis=2), CAP)  # (27, 6)
+    visible = np.ones(27, bool) if visible is None else np.asarray(visible, bool)
+    dist[~visible] = 0.0
+    n_visible = int(visible.sum())
     cand_letters = letter_idx[_CAND_VISIBLE]                             # (n, 27)
     scores = dist[np.arange(27)[None, :], cand_letters].sum(axis=1)
     scores += np.array([PRIOR[len(m)] - (EXPECTED_BONUS if expected and m == (expected,) else 0)
@@ -72,9 +105,15 @@ def decide(state_letters, obs, refs, expected=None):
     first, second = list(best.values())
     moves = _CANDIDATES[first][0]
     new_letters = np.array(state_letters)[_CANDIDATES[first][1]]
-    if scores[first] / 27 > LOST_PER_STICKER:
+    if info is not None:
+        info.update(best=list(moves), second=list(_CANDIDATES[second][0]), visible=n_visible,
+                    per_sticker=round(float(scores[first]) / max(n_visible, 1), 1),
+                    margin=round(float(scores[second] - scores[first]), 1))
+    if n_visible < MIN_VISIBLE:
+        return 'unsure', moves, new_letters
+    if scores[first] / n_visible > LOST_PER_STICKER:
         return 'lost', moves, new_letters
-    if scores[second] - scores[first] < MARGIN:
+    if scores[second] - scores[first] < MARGIN * n_visible / 27:
         return 'unsure', moves, new_letters
     return 'ok', moves, new_letters
 
@@ -94,15 +133,22 @@ class TrackSession:
     (54 face letters); plan: the solution moves; refs: {letter: weighted Lab}
     from the scan; solve: function(CubeState) -> moves, for re-planning;
     face_colors: {face letter: colour name}, passed on to clients so they can
-    draw the cube in its real colours."""
+    draw the cube in its real colours. on_mistake: 'undo' (show how to turn
+    back, then carry on with the same plan) or 'replan' (solve again from
+    wherever the cube is)."""
 
-    def __init__(self, state_letters, plan, refs, solve, face_colors=None):
+    def __init__(self, state_letters, plan, refs, solve, face_colors=None, on_mistake='undo'):
         self.letters = np.array(state_letters)
         self.plan = list(plan)
         self.step = 0
         self.refs = dict(refs)
         self.solve = solve
         self.face_colors = dict(face_colors or {})
+        self.on_mistake = on_mistake
+        self.off = []                  # mistakes still to undo (merged per face)
+        self.counts = {}               # what happened to the frames, for the log (see LiveClient)
+        self.on_judgement = None       # optional callback(dict) after each judgement (session recording)
+        self._resume_letters = None    # the cube where the plan carries on once they're undone
         self.home_ok = False
         self._buffer, self._last_kpts = [], None
         self._steady_since = None
@@ -113,87 +159,188 @@ class TrackSession:
     def solved(self):
         return ''.join(self.letters) == ''.join(solved_state().arr)
 
+    def _count(self, what):
+        self.counts[what] = self.counts.get(what, 0) + 1
+
+    def position_hint(self):
+        """How to hold the cube, in its own colours (the centres never move)."""
+        c = self.face_colors
+        if not all(c.get(f) for f in 'UFR'):
+            return 'Hold it in the first position: Top, Front and Right toward the camera.'
+        return f"Hold it with {c['U']} on top, {c['F']} facing you and {c['R']} on the right."
+
+    def home_message(self):
+        return 'Turn the cube back to the first position. ' + self.position_hint()
+
+    def _plan_move(self):
+        return self.plan[self.step] if self.step < len(self.plan) else None
+
+    def _expected(self):
+        """The move to show: the next undo move while off track, else the plan's next move."""
+        return undo_moves(self.off)[0] if self.off else self._plan_move()
+
     def status(self, event=None, message=None):
-        expected = self.plan[self.step] if self.step < len(self.plan) else None
+        expected = self._expected()
         if message is None and not self.home_ok and not self.solved:
-            message = HOME_MESSAGE  # always say it while waiting, so clients don't flicker
-        return {'phase': 'solved' if self.solved else ('tracking' if self.home_ok else 'home'),
+            message = self.home_message()  # always say it while waiting, so clients don't flicker
+        if self.solved:
+            phase = 'solved'
+        elif not self.home_ok:
+            phase = 'home'
+        else:
+            phase = 'undo' if self.off else 'tracking'
+        return {'phase': phase, 'undo': undo_moves(self.off), 'plan_move': self._plan_move(),
                 'step': self.step + 1, 'total': len(self.plan), 'move': expected,
                 'steady': len(self._buffer), 'needed': STEADY_FRAMES, 'event': event, 'message': message,
                 'state': ''.join(self.letters), 'face_colors': self.face_colors}
 
     def skip(self):
         """The user says they did the shown move (fallback if tracking struggles)."""
-        if self.step < len(self.plan):
-            self.letters = apply_moves(CubeState(self.letters), [self.plan[self.step]]).arr
+        move = self._expected()
+        if move is None:
+            return self.status()
+        self.letters = apply_moves(CubeState(self.letters), [move]).arr
+        if self.off:
+            push_mistake(self.off, move)
+            if not self.off:
+                return self.status('undone', f'Back on track. Now do {self._plan_move()}.')
+        else:
             self.step += 1
         return self.status('correct', 'Marked as done.')
+
+    def replan(self):
+        """Gives up on undoing and solves again from where the cube is now."""
+        self.off, self._resume_letters = [], None
+        if not self.solved:
+            self.plan = self.solve(CubeState(self.letters))
+            self.step = 0
+        return self.status('replanned', f'New plan: {len(self.plan)} moves.')
 
     def feed(self, frame_result, now=None):
         now = time.monotonic() if now is None else now
         if self.solved:
             return self.status('solved' if self.step else None)
         kpts, faces = frame_result.get('keypoints'), frame_result.get('faces')
+        self._count('frames')
+        if frame_result.get('hands_busy'):  # mid-turn: judge the result once the hands stop
+            self._count('hands turning')
+            self._buffer, self._last_kpts, self._lost_since = [], None, None
+            return self.status()
         if not (kpts and frame_result.get('confident') and faces and all(None not in faces[f] for f in 'UFR')):
+            self._count('no cube')
             self._buffer, self._last_kpts = [], None
             return self._maybe_lost(now)
         k = np.asarray(kpts, float)
         size = np.mean(np.linalg.norm(k[1:] - k[0], axis=1))
         if self._last_kpts is not None and np.max(np.linalg.norm(k - self._last_kpts, axis=1)) > MAX_MOVE * size:
+            self._count('cube moving')
             self._buffer = []
         if not self._buffer:
             self._steady_since = now
         self._last_kpts = k
-        self._buffer.append(reading_features(faces))
+        covered = frame_result.get('covered')
+        self._buffer.append((reading_features(faces),
+                             np.array([not (covered and covered[f][i]) for f in 'UFR' for i in range(9)])))
         if len(self._buffer) < STEADY_FRAMES or now - self._steady_since < STEADY_SECONDS - 1e-6:
             return self.status()
-        obs = np.median(self._buffer, axis=0)
+        feats = np.array([f for f, _ in self._buffer])                   # (frames, 27, 3)
+        clear = np.array([v for _, v in self._buffer])                   # (frames, 27)
+        visible = clear.any(axis=0)
+        # Each sticker: the median over the frames where nothing covered it.
+        obs = np.array([np.median(feats[clear[:, i], i] if visible[i] else feats[:, i], axis=0) for i in range(27)])
         self._buffer = []
-        expected = self.plan[self.step] if self.step < len(self.plan) else None
-        verdict, moves, new_letters = decide(self.letters, obs, self.refs, expected)
+        expected = self._expected()
+        info = {}
+        verdict, moves, new_letters = decide(self.letters, obs, self.refs, expected, visible, info)
+        self._count(f'judged {verdict}')
+        self.last_judgement = {'phase': 'tracking' if self.home_ok else 'home', 'expected': expected,
+                               'verdict': verdict, **info}
+        if self.on_judgement:
+            self.on_judgement({**self.last_judgement, 'obs': np.round(obs, 1).tolist(),
+                               'visible': visible.tolist(), 'state': ''.join(self.letters)})
 
         if not self.home_ok:
             if verdict == 'ok' and moves == ():
                 self.home_ok = True
                 self._lost_since = None
-                self._recalibrate(obs)
+                self._recalibrate(obs, None, visible)
                 return self.status('home', 'Cube in position. Do the first move.')
-            return self._maybe_lost(now, HOME_MESSAGE)
+            return self._maybe_lost(now, self.home_message())
         if verdict == 'lost':
             return self._maybe_lost(now)
         self._lost_since = None
         if verdict == 'unsure':
             return self.status('unsure')
-        self._recalibrate(obs, new_letters)
+        self._recalibrate(obs, new_letters, visible)
         if moves == ():
             return self.status()
         self.history.append(moves)
         self.letters = new_letters
-        if moves == (expected,):
-            self.step += 1
-            if self.solved:
-                return self.status('solved', 'Solved!')
-            return self.status('correct')
-        # Anything else: say what happened and re-plan from the real cube.
-        did = ' then '.join(moves)
         if self.solved:
-            return self.status('solved', f'You did {did} -- and that solved it!')
-        self.plan = self.solve(CubeState(self.letters))
-        self.step = 0
-        return self.status('wrong', f'You did {did} instead of {expected}. New plan: {len(self.plan)} moves.')
+            if not self.off and moves == (expected,):
+                self.step += 1
+            self.off, self._resume_letters = [], None
+            return self.status('solved', 'Solved!' if moves == (expected,) else
+                               f"You did {' then '.join(moves)} -- and that solved it!")
+        if not self.off and len(moves) == 2 and moves[0] == expected:
+            self.step += 1  # the right move, then another one: only the second needs undoing
+            moves, expected = moves[1:], self._plan_move()
+        if not self.off and moves == (expected,):
+            self.step += 1
+            return self.status('correct')
+        if self.off:
+            return self._while_off_track(moves, expected)
+        # A different move from the one asked for.
+        did = ' then '.join(moves)
+        if self.on_mistake == 'replan':
+            self.plan = self.solve(CubeState(self.letters))
+            self.step = 0
+            return self.status('wrong', f'You did {did} instead of {expected}. New plan: {len(self.plan)} moves.')
+        self._resume_letters = apply_moves(CubeState(self.letters), undo_moves(list(moves))).arr
+        for m in moves:
+            push_mistake(self.off, m)
+        if not self.off:  # e.g. the two moves cancelled each other out
+            return self.status()
+        return self._undo_or_replan(f'You did {did} instead of {expected}.')
 
-    def _recalibrate(self, obs, letters=None):
+    def _while_off_track(self, moves, expected):
+        for m in moves:
+            push_mistake(self.off, m)
+        if not self.off:
+            self._resume_letters = None
+            return self.status('undone', f'Undone -- back on track. Now do {self._plan_move()}.')
+        nxt = self._plan_move()
+        if nxt and ''.join(self.letters) == ''.join(apply_moves(CubeState(self._resume_letters), [nxt]).arr):
+            # They reached the plan's next position another way: that's fine too.
+            self.off, self._resume_letters = [], None
+            self.step += 1
+            return self.status('correct', 'That works too -- back on track.')
+        if moves == (expected,):
+            return self.status('correct', f"Good. Now undo: {' then '.join(undo_moves(self.off))}.")
+        return self._undo_or_replan(f"You did {' then '.join(moves)} instead of {expected}.")
+
+    def _undo_or_replan(self, what):
+        undo = undo_moves(self.off)
+        if len(undo) > MAX_UNDO:
+            self.off, self._resume_letters = [], None
+            self.plan = self.solve(CubeState(self.letters))
+            self.step = 0
+            return self.status('wrong', f'{what} Too many moves to undo, so here is a new plan: {len(self.plan)} moves.')
+        return self.status('wrong', f"{what} Undo it: {' then '.join(undo)}, then carry on with the plan.")
+
+    def _recalibrate(self, obs, letters=None, visible=None):
         letters = self.letters if letters is None else letters
-        fresh = refs_from(letters[_VISIBLE], obs)
+        keep = np.ones(27, bool) if visible is None else visible  # never learn a colour from a finger
+        fresh = refs_from(np.asarray(letters)[_VISIBLE][keep], obs[keep])
         for x, lab in fresh.items():  # follow lighting changes gently
             self.refs[x] = 0.5 * self.refs[x] + 0.5 * lab
 
     def _maybe_lost(self, now, message=None):
         if not self.home_ok:  # still turning the cube back after the scan: not lost, just not there yet
-            return self.status(None, HOME_MESSAGE)
+            return self.status(None, self.home_message())
         if self._lost_since is None:
             self._lost_since = now
         if now - self._lost_since >= LOST_AFTER_S:
-            return self.status('lost', message or "Lost track of the cube. Turn it back to the first position, "
-                                                  "or scan again if the moves got mixed up.")
+            return self.status('lost', message or f"Lost track of the cube. {self.position_hint()} "
+                                                  "If the moves got mixed up, scan again.")
         return self.status(None, message)

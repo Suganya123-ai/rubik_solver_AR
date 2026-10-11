@@ -109,6 +109,7 @@ namespace RubikSolverAR.Live
         public void CheckScan(Dictionary<string, string> locked) => SendCommand(new { type = "scan_check", locked });
         public void AcceptScan(JToken colors) => SendCommand(new { type = "scan_accept", colors });
         public void SkipMove() => SendCommand(new { type = "track_skip" });
+        public void NewPlan() => SendCommand(new { type = "track_replan" });
         public void StopTracking() => SendCommand(new { type = "track_stop" });
         public void SaveFrame() => SendCommand(new { type = "save" });
 

@@ -21,6 +21,27 @@
         <video id="video" autoplay playsinline muted></video>
         <canvas id="overlay"></canvas>
         <div class="live-status" id="live-status">Starting camera…</div>
+        <div class="hands-chip" id="hands-chip" hidden>✋ Turning… hold the cube still when you're done</div>
+        <div class="ar-holo" id="ar-holo" hidden>
+          <canvas id="ar-holo-canvas" aria-label="3D cube showing the next move"></canvas>
+        </div>
+        <div class="ar-hud" id="ar-hud">
+          <div class="ar-progress" id="ar-progress" hidden>
+            <span id="ar-step"></span>
+            <div class="ar-bar"><div id="ar-bar-fill"></div></div>
+          </div>
+          <div class="ar-buttons">
+            <button class="primary" id="ar-start-btn">Start scan</button>
+            <button class="secondary" id="ar-skip-btn" hidden>I did this move</button>
+            <button class="secondary" id="ar-replan-btn" hidden>New plan instead</button>
+            <button class="secondary" id="ar-exit-btn" title="Esc">Exit glasses view</button>
+          </div>
+        </div>
+        <div class="video-guide" id="video-guide" hidden>
+          <span class="video-guide-label" id="video-guide-label"></span>
+          <span class="video-guide-move" id="video-guide-move"></span>
+          <span class="video-guide-text" id="video-guide-text"></span>
+        </div>
       </div>
       <div class="live-stats">
         <span><b id="stat-fps">–</b> frames/s</span>
@@ -29,7 +50,8 @@
         <span>confidence <b id="stat-conf">–</b></span>
       </div>
       <div class="controls">
-        <button class="primary" id="save-btn" disabled>Save frame</button>
+        <button class="primary" id="ar-btn" title="G">Glasses view</button>
+        <button class="secondary" id="save-btn" disabled>Save frame</button>
         <span class="save-count" id="save-count">0 frames saved</span>
         <a class="secondary label-link" href="/label">Label saved frames →</a>
       </div>
@@ -57,6 +79,7 @@
         <div class="controls">
           <button class="primary" id="review-confirm-btn">Highlighted look right</button>
           <button class="primary" id="solve-btn" hidden>Solve</button>
+          <label class="undo-choice"><input type="checkbox" id="undo-mistakes" checked> After a wrong move, show me how to undo it</label>
           <button class="secondary" id="rescan-btn">Scan again</button>
         </div>
       </div>
@@ -73,6 +96,7 @@
         <p class="hint">The camera checks every move. After each turn, hold the cube still for a moment, corner-on, in the first position.</p>
         <div class="controls">
           <button class="secondary" id="track-skip-btn">I did this move</button>
+          <button class="secondary" id="track-replan-btn" hidden>New plan instead</button>
           <button class="secondary" id="guide-rescan-btn">Scan a new cube</button>
         </div>
       </div>

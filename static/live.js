@@ -19,10 +19,18 @@ const sendCanvas = document.createElement('canvas');
 
 document.addEventListener('DOMContentLoaded', () => {
   for (const id of ['video', 'overlay', 'live-status', 'stat-fps', 'stat-latency', 'stat-server', 'stat-conf',
-                    'save-btn', 'save-count', 'live-faces', 'error-banner']) {
+                    'save-btn', 'save-count', 'live-faces', 'error-banner', 'live-stage', 'ar-btn', 'ar-exit-btn',
+                    'ar-holo', 'hands-chip']) {
     els[id] = document.getElementById(id);
   }
   els['save-btn'].addEventListener('click', () => ws && ws.send(JSON.stringify({ type: 'save' })));
+  els['ar-btn'].addEventListener('click', () => setGlassesView(true));
+  els['ar-exit-btn'].addEventListener('click', () => setGlassesView(false));
+  document.addEventListener('keydown', (e) => {
+    if (e.target.closest && e.target.closest('input, textarea')) return;
+    if (e.key === 'Escape') setGlassesView(false);
+    else if (e.key === 'g' || e.key === 'G') setGlassesView(!window.glassesView);
+  });
   renderFaces(null);
   startCamera();
 });
@@ -116,6 +124,15 @@ function handleMessage(msg) {
   requestAnimationFrame(sendFrame);
 }
 
+// Glasses view: the camera picture full screen with the heads-up display,
+// as the wearer will see it through the XREAL glasses.
+window.setGlassesView = setGlassesView;
+function setGlassesView(on) {
+  window.glassesView = !!on;
+  els['live-stage'].classList.toggle('ar', window.glassesView);
+  if (window.onGlassesView) window.onGlassesView(window.glassesView);
+}
+
 function setStatus(text, cls) {
   els['live-status'].textContent = text;
   els['live-status'].className = 'live-status ' + cls;
@@ -128,16 +145,20 @@ function drawOverlay(msg) {
   canvas.height = stage.height * devicePixelRatio;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!msg.keypoints) return;
 
   // The video is letterboxed (object-fit: contain): map frame pixels to canvas pixels.
   const scale = Math.min(canvas.width / msg.width, canvas.height / msg.height);
   const ox = (canvas.width - msg.width * scale) / 2;
   const oy = (canvas.height - msg.height * scale) / 2;
   const P = (p) => [ox + p[0] * scale, oy + p[1] * scale];
-  const pts = msg.keypoints.map(P);
   const px = devicePixelRatio;
-  ctx.globalAlpha = msg.confident ? 1 : 0.55;  // unsure guesses are drawn faded
+  drawHands(ctx, msg.hands, P, px, msg.hands_busy);
+  els['hands-chip'].hidden = !(msg.hands_busy && window.cubeTaskActive);
+  if (!msg.keypoints) return;
+  const pts = msg.keypoints.map(P);
+  const guide = window.liveGuide;  // set by scan_ui.js while solving: {move, undo}
+  const guiding = guide && guide.move && msg.confident;
+  ctx.globalAlpha = guiding ? 0.3 : (msg.confident ? 1 : 0.55);  // while guiding, the move is what matters
 
   for (const face of FACES) {
     const corners = FACE_CORNERS[face].map((i) => pts[i]);
@@ -167,6 +188,74 @@ function drawOverlay(msg) {
     ctx.fillStyle = '#fff';
     ctx.fillText(String(i), x + 8 * px, y - 8 * px);
   });
+  ctx.globalAlpha = 1;
+  drawCovered(ctx, pts, msg.covered, px);
+  if (guiding && window.drawMoveOnVideo) window.drawMoveOnVideo(ctx, pts, guide.move, { undo: guide.undo });
+  if (window.glassesView) placeHologram(pts, canvas);
+}
+
+// Stickers a finger is covering: the camera can't read them, so they are left out.
+function drawCovered(ctx, pts, covered, px) {
+  if (!covered) return;
+  ctx.save();
+  ctx.setLineDash([5 * px, 4 * px]);
+  ctx.lineWidth = 2 * px;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+  for (const face of FACES) {
+    const c = FACE_CORNERS[face].map((i) => pts[i]);
+    covered[face].forEach((hidden, k) => {
+      if (!hidden) return;
+      const r = Math.floor(k / 3), col = k % 3;
+      const at = (u, v) => lerp(lerp(c[0], c[1], u), lerp(c[3], c[2], u), v);  // bilinear on the side
+      const q = [at(col / 3, r / 3), at((col + 1) / 3, r / 3), at((col + 1) / 3, (r + 1) / 3), at(col / 3, (r + 1) / 3)];
+      ctx.beginPath();
+      q.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.closePath();
+      ctx.stroke();
+    });
+  }
+  ctx.restore();
+}
+
+const HAND_BONES = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12],
+                    [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [0, 17], [17, 18], [18, 19], [19, 20]];
+
+function drawHands(ctx, hands, P, px, busy) {
+  if (!hands || !hands.length) return;
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.shadowColor = busy ? 'rgba(255, 255, 255, 0.9)' : 'rgba(127, 232, 255, 0.8)';
+  ctx.shadowBlur = 8 * px;
+  for (const hand of hands) {
+    const p = hand.points.map(P);
+    ctx.strokeStyle = busy ? 'rgba(255, 255, 255, 0.9)' : 'rgba(127, 232, 255, 0.75)';
+    ctx.lineWidth = 3 * px;
+    for (const [a, b] of HAND_BONES) line(ctx, p[a], p[b]);
+    ctx.fillStyle = '#fff';
+    for (const i of [4, 8, 12, 16, 20]) { ctx.beginPath(); ctx.arc(p[i][0], p[i][1], 4.5 * px, 0, Math.PI * 2); ctx.fill(); }
+  }
+  ctx.restore();
+}
+
+// The floating 3D cube sits beside the real cube (right if there's room, else left), gliding as it moves.
+let holoPos = null;
+function placeHologram(pts, canvas) {
+  const box = els['ar-holo'];
+  if (box.hidden) return;
+  const k = 1 / devicePixelRatio;
+  const xs = pts.map((p) => p[0] * k), ys = pts.map((p) => p[1] * k);
+  const left = Math.min(...xs), right = Math.max(...xs), top = Math.min(...ys), bottom = Math.max(...ys);
+  const W = canvas.width * k, H = canvas.height * k;
+  const gap = Math.max(16, (right - left) * 0.12);
+  const roomRight = W - 10 - (right + gap), roomLeft = left - gap - 10;
+  // As big as the real cube, but never covering it: shrink to the roomier side.
+  const size = Math.max(150, Math.min(340, (bottom - top) * 1.1, Math.max(roomRight, roomLeft)));
+  let x = roomRight >= roomLeft ? right + gap : left - gap - size;
+  x = Math.max(10, Math.min(W - size - 10, x));
+  const y = Math.max(70, Math.min(H - size - 130, (top + bottom) / 2 - size / 2));
+  holoPos = holoPos ? holoPos.map((v, i) => v + ([x, y, size][i] - v) * 0.35) : [x, y, size];
+  box.style.transform = `translate(${holoPos[0]}px, ${holoPos[1]}px)`;
+  box.style.width = box.style.height = `${holoPos[2]}px`;
 }
 
 function lerp(a, b, f) { return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]; }

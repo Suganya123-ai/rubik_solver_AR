@@ -16,6 +16,7 @@ from cube.scan import VIEW_INSTRUCTIONS, assemble, scan_result
 STEADY_FRAMES = 5
 STEADY_SECONDS = 0.4
 MAX_MOVE = 0.03          # fraction of the cube's size
+FLIP_GRACE_S = 3.0        # after view 1 is captured, give the user this long to flip before warning
 SAME_SIDE_DISTANCE = 27   # mean colour-feature distance below which two sides are the same side (renders: same <= 25, different >= 29)
 
 
@@ -26,6 +27,7 @@ class ScanSession:
         self._buffer = []
         self._last_kpts = None
         self._steady_since = None
+        self._captured_at = None
         self.result = None
 
     def status(self, message=None):
@@ -42,7 +44,8 @@ class ScanSession:
         if self.result is not None:
             return {**self.status(), 'event': None}
         kpts, faces = frame_result.get('keypoints'), frame_result.get('faces')
-        if not (kpts and frame_result.get('confident') and faces and all(None not in faces[f] for f in 'UFR')):
+        if not (kpts and frame_result.get('confident') and faces and all(None not in faces[f] for f in 'UFR')) \
+                or frame_result.get('hands_busy'):  # (hands turning the cube: wait until they stop)
             self._reset_steady()
             return {**self.status(), 'event': None}
         k = np.asarray(kpts, float)
@@ -52,18 +55,22 @@ class ScanSession:
         if not self._buffer:
             self._steady_since = now
         self._last_kpts = k
-        self._buffer.append(faces)
+        self._buffer.append((faces, frame_result.get('covered')))
         if len(self._buffer) < STEADY_FRAMES or now - self._steady_since < STEADY_SECONDS - 1e-6:
             return {**self.status(), 'event': None}
 
-        reading = {f: [tuple(np.median([b[f][i] for b in self._buffer], axis=0)) for i in range(9)] for f in 'UFR'}
+        reading = {f: [_uncovered_median(self._buffer, f, i) for i in range(9)] for f in 'UFR'}
         self._reset_steady()
         if self.view == 2 and self._shares_a_side_with_view1(reading):
-            return {**self.status('That looks like the first view again. Flip the cube as shown.'), 'event': None}
+            # Still the first side: expected for a moment while they get ready to flip.
+            flipping = self._captured_at is not None and now - self._captured_at < FLIP_GRACE_S
+            message = None if flipping else 'That looks like the first view again. Flip the cube as shown.'
+            return {**self.status(message), 'event': None}
         self.readings[self.view] = reading
         if self.view == 1:
             self.view = 2
-            return {**self.status('View 1 captured. Now flip the cube.'), 'event': 'captured'}
+            self._captured_at = now
+            return {**self.status('Side 1 captured. Now flip the cube.'), 'event': 'captured'}
         self.result = scan_result(assemble(self.readings))
         return {**self.status('Both views captured.'), 'event': 'done'}
 
@@ -85,6 +92,13 @@ class ScanSession:
                     if np.mean(np.linalg.norm(ring - np.roll(old, 2 * turn, axis=0), axis=1)) < SAME_SIDE_DISTANCE:
                         return True
         return False
+
+
+def _uncovered_median(buffer, face, i):
+    """A sticker's colour over the steady frames, using only frames where no
+    finger covered it (all frames if it was covered in every one)."""
+    clear = [faces[face][i] for faces, covered in buffer if not (covered and covered[face][i])]
+    return tuple(np.median(clear or [faces[face][i] for faces, _ in buffer], axis=0))
 
 
 _RING = (0, 1, 2, 5, 8, 7, 6, 3)  # a side's outer stickers, clockwise

@@ -136,4 +136,68 @@
   background: repeating-linear-gradient(0deg, rgba(127, 232, 255, .05) 0 1px, transparent 1px 4px);
 }
 .hologram canvas { display: block; width: 100%; aspect-ratio: 1; touch-action: none; cursor: grab; }
-.hologram-hint { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: .72rem; color: rgba(190, 240, 255, .7); pointer-events: none; }
+.hologram-hint { display: block; text-align: center; font-size: .72rem; color: rgba(190, 240, 255, .7); padding: 0 0 6px; }
+
+/* The next move, written over the camera picture while solving */
+.video-guide {
+  position: absolute; left: 10px; right: 10px; bottom: 10px; padding: 6px 12px; border-radius: 12px;
+  background: rgba(8, 14, 22, .78); border: 1px solid rgba(127, 232, 255, .6); color: #e6f9ff;
+  display: grid; grid-template-columns: auto 1fr; column-gap: 12px; align-items: center; pointer-events: none;
+  box-shadow: 0 0 18px rgba(90, 220, 255, .25);
+}
+.video-guide[hidden] { display: none; }
+.video-guide-label { grid-column: 1 / 3; font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: #7fe8ff; }
+.video-guide-move { font-size: 2rem; font-weight: 800; color: #7fe8ff; line-height: 1.1; }
+.video-guide-text { font-size: .85rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.video-guide.undo { border-color: #ffb547; box-shadow: 0 0 18px rgba(255, 181, 71, .3); }
+.video-guide.undo .video-guide-label, .video-guide.undo .video-guide-move { color: #ffb547; }
+.video-guide.good { border-color: var(--good); }
+.video-guide.good .video-guide-label { color: var(--good); }
+.guide-move.undo { color: #ffb547; }
+.undo-choice { display: flex; gap: 6px; align-items: center; font-size: .85rem; color: var(--muted); width: 100%; }
+
+/* Hands turning the cube */
+.hands-chip {
+  position: absolute; right: 10px; top: 10px; padding: 6px 12px; border-radius: 999px; font-size: .85rem;
+  background: rgba(8, 14, 22, .8); border: 1px solid rgba(255, 255, 255, .5); color: #fff; pointer-events: none;
+}
+.hands-chip[hidden] { display: none; }
+
+/* Glasses view: the camera picture full screen with a heads-up display, as through the XREAL glasses */
+.ar-hud, .ar-holo { display: none; }
+.live-stage.ar {
+  position: fixed; inset: 0; z-index: 1000; width: 100vw; height: 100vh; aspect-ratio: auto; border-radius: 0;
+}
+.live-stage.ar .ar-hud {
+  display: flex; position: absolute; left: 10px; right: 10px; top: 10px; gap: 12px; align-items: flex-start;
+  justify-content: space-between; pointer-events: none;
+}
+.live-stage.ar .ar-hud > * { pointer-events: auto; }
+.live-stage.ar .live-status { top: auto; bottom: 120px; }
+.live-stage.ar .hands-chip { top: 64px; }
+.ar-progress {
+  min-width: 220px; padding: 8px 12px; border-radius: 12px; background: rgba(8, 14, 22, .78);
+  border: 1px solid rgba(127, 232, 255, .5); color: #e6f9ff; font-size: .9rem;
+}
+.ar-progress[hidden] { display: none; }
+.ar-bar { height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .15); margin-top: 6px; overflow: hidden; }
+.ar-bar > div { height: 100%; width: 0; background: #7fe8ff; transition: width .3s; }
+.ar-buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+.ar-buttons button[hidden] { display: none; }
+.live-stage.ar .ar-holo {
+  display: block; position: absolute; left: 0; top: 0; width: 240px; height: 240px; pointer-events: auto;
+  border-radius: 16px; border: 1px solid rgba(127, 232, 255, .35);
+  background: radial-gradient(ellipse at 50% 45%, rgba(90, 220, 255, .16), rgba(10, 16, 24, .35) 70%);
+  box-shadow: 0 0 30px rgba(90, 220, 255, .18); transition: opacity .3s;
+}
+.live-stage.ar .ar-holo[hidden] { display: none; }
+.ar-holo canvas { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+.live-stage.ar .video-guide { left: 50%; right: auto; transform: translateX(-50%); width: min(720px, 92vw); bottom: 18px; }
+.live-stage.ar .video-guide-move { font-size: 2.6rem; }
+.live-stage.ar .video-guide-text { font-size: 1rem; }
+
+/* A side was captured: green flash round the picture, and the message in green */
+@keyframes flash-good { 0% { box-shadow: inset 0 0 0 6px rgba(62, 207, 142, .95); } 100% { box-shadow: inset 0 0 0 6px rgba(62, 207, 142, 0); } }
+.live-stage.flash-good::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 5; animation: flash-good 1.2s ease-out forwards; border-radius: inherit; }
+.scan-success { color: var(--good); font-weight: 700; font-size: 1rem; }
+.video-guide.good .video-guide-move { color: var(--good); }
