@@ -1,0 +1,8 @@
+numpy
+pillow
+opencv-python
+kociemba
+RubikTwoPhase
+ultralytics
+fastapi
+httpx

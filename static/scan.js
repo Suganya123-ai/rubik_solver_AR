@@ -7,12 +7,14 @@ const FACE_INSTRUCTIONS = {
   L: "Turn the cube to show the LEFT face to the camera.",
   R: "Turn the cube to show the RIGHT face to the camera.",
 };
+const FACE_LABELS = { U: 'Top', F: 'Front', D: 'Bottom', B: 'Back', L: 'Left', R: 'Right' };
 const COLOR_NAMES = ['white', 'yellow', 'red', 'orange', 'green', 'blue'];
 
-let faceIndex = 0;
+let activeFace = 'U';  // side being scanned, or null once all 6 are captured
 let detectedColors = null;
 let selectedStickerIndex = null;
 let capturedDataUrl = null;
+const capturedFaces = {};  // face letter -> 9 confirmed color names
 
 const els = {};
 document.addEventListener('DOMContentLoaded', () => {
@@ -30,19 +32,71 @@ document.addEventListener('DOMContentLoaded', () => {
     retakeBtn: document.getElementById('retake-btn'),
     confirmBtn: document.getElementById('confirm-btn'),
     errorBanner: document.getElementById('error-banner'),
+    duplicateWarning: document.getElementById('duplicate-warning'),
+    capturedFaces: document.getElementById('captured-faces'),
+    capturedCount: document.getElementById('captured-count'),
+    capturedHint: document.getElementById('captured-hint'),
+    solveBtn: document.getElementById('solve-btn'),
+    startOverBtn: document.getElementById('start-over-btn'),
   });
   buildPalette();
-  renderFaceProgress();
-  updateInstructions();
   startCamera();
   els.captureBtn.addEventListener('click', onCapture);
   els.retakeBtn.addEventListener('click', onRetake);
   els.confirmBtn.addEventListener('click', onConfirmFace);
+  els.solveBtn.addEventListener('click', finalizeScan);
+  els.startOverBtn.addEventListener('click', startOver);
+  restoreCapturedFaces();
 });
 
-function showError(message) {
+// The server keeps the confirmed sides, so a reload picks up where you left off.
+async function restoreCapturedFaces() {
+  try {
+    const res = await fetch('/api/state');
+    if (res.ok) Object.assign(capturedFaces, (await res.json()).confirmed);
+  } catch (e) {
+    // Nothing to restore -- start fresh.
+  }
+  activeFace = nextUncapturedFace();
+  render();
+}
+
+function nextUncapturedFace() {
+  return FACE_ORDER.find((f) => !capturedFaces[f]) || null;
+}
+
+function render() {
+  renderFaceProgress();
+  renderCapturedFaces();
+  updateInstructions();
+}
+
+function showError(message, extra) {
   els.errorBanner.textContent = message;
+  if (extra) els.errorBanner.appendChild(extra);
   els.errorBanner.classList.add('show');
+}
+
+// One chip per color showing how many stickers of it were captured, with
+// the ones that aren't exactly 9 flagged so it's clear which to look for.
+function buildColorCounts() {
+  const counts = Object.fromEntries(COLOR_NAMES.map((c) => [c, 0]));
+  FACE_ORDER.forEach((f) => (capturedFaces[f] || []).forEach((c) => { counts[c] += 1; }));
+  const wrap = document.createElement('div');
+  wrap.className = 'color-counts';
+  COLOR_NAMES.forEach((color) => {
+    const diff = counts[color] - 9;
+    const chip = document.createElement('div');
+    chip.className = 'color-count' + (diff ? ' off' : '');
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch color-' + color;
+    const text = document.createElement('span');
+    text.textContent = color + ': ' + counts[color] +
+      (diff > 0 ? ' (' + diff + ' too many)' : diff < 0 ? ' (' + -diff + ' missing)' : ' \u2713');
+    chip.append(swatch, text);
+    wrap.appendChild(chip);
+  });
+  return wrap;
 }
 
 function clearError() {
@@ -60,21 +114,90 @@ async function startCamera() {
 
 function renderFaceProgress() {
   els.faceProgress.innerHTML = '';
-  FACE_ORDER.forEach((f, i) => {
+  FACE_ORDER.forEach((f) => {
     const chip = document.createElement('span');
-    chip.className = 'face-chip' + (i < faceIndex ? ' done' : i === faceIndex ? ' active' : '');
+    chip.className = 'face-chip' + (f === activeFace ? ' active' : capturedFaces[f] ? ' done' : '');
     chip.textContent = f;
     els.faceProgress.appendChild(chip);
   });
 }
 
-function updateInstructions() {
-  const face = FACE_ORDER[faceIndex];
-  els.scanInstructions.textContent = FACE_INSTRUCTIONS[face];
+function renderCapturedFaces() {
+  els.capturedFaces.innerHTML = '';
+  FACE_ORDER.forEach((f) => {
+    const colors = capturedFaces[f];
+    const tile = document.createElement('button');
+    tile.type = 'button';
+    tile.className = 'captured-face' + (colors ? ' done' : '') + (f === activeFace ? ' active' : '');
+    tile.title = (colors ? 'Redo the ' : 'Scan the ') + FACE_LABELS[f] + ' side';
+    tile.addEventListener('click', () => selectFace(f));
+    const grid = document.createElement('div');
+    grid.className = 'mini-grid';
+    (colors || Array(9).fill(null)).forEach((color) => {
+      const cell = document.createElement('div');
+      if (color) cell.className = 'color-' + color;
+      grid.appendChild(cell);
+    });
+    const label = document.createElement('span');
+    label.textContent = FACE_LABELS[f] + ' (' + f + ')';
+    tile.append(grid, label);
+    els.capturedFaces.appendChild(tile);
+  });
+  const count = Object.keys(capturedFaces).length;
+  els.capturedCount.textContent = count + ' / ' + FACE_ORDER.length;
+  els.capturedHint.textContent = count ? '· tap a side to redo it' : '';
+  els.solveBtn.style.display = count === FACE_ORDER.length ? '' : 'none';
+  els.startOverBtn.style.display = count ? '' : 'none';
 }
 
-function currentFace() {
-  return FACE_ORDER[faceIndex];
+function selectFace(face) {
+  activeFace = face;
+  clearError();
+  showCamera();
+  render();
+}
+
+async function startOver() {
+  await fetch('/api/reset', { method: 'POST' });
+  FACE_ORDER.forEach((f) => delete capturedFaces[f]);
+  clearError();
+  showCamera();
+  activeFace = nextUncapturedFace();
+  render();
+}
+
+// Every side has a unique center color, so a center already seen on another
+// captured side means the same side was shown twice.
+function duplicateOf(face, colors) {
+  return FACE_ORDER.find((f) => f !== face && capturedFaces[f] && capturedFaces[f][4] === colors[4]) || null;
+}
+
+function updateDuplicateWarning() {
+  const face = activeFace;
+  const dup = duplicateOf(face, detectedColors);
+  if (dup) {
+    els.duplicateWarning.textContent =
+      'This looks like the ' + FACE_LABELS[dup] + ' (' + dup + ') side you already captured -- both have a ' +
+      detectedColors[4] + ' center. Retake and show the ' + FACE_LABELS[face] + ' (' + face + ') side. ' +
+      "If the center isn't actually " + detectedColors[4] + ', tap it and correct it.';
+    els.duplicateWarning.classList.add('show');
+  } else {
+    els.duplicateWarning.classList.remove('show');
+  }
+  els.confirmBtn.disabled = !!dup;
+}
+
+function updateInstructions() {
+  const face = activeFace;
+  els.cameraWrap.style.display = face ? 'block' : 'none';
+  els.captureBtn.style.display = face ? '' : 'none';
+  if (!face) {
+    els.scanInstructions.textContent = 'All 6 sides captured. Tap Solve below, or tap a side to redo it.';
+  } else if (capturedFaces[face]) {
+    els.scanInstructions.textContent = 'Redoing the ' + FACE_LABELS[face] + ' side. ' + FACE_INSTRUCTIONS[face];
+  } else {
+    els.scanInstructions.textContent = FACE_INSTRUCTIONS[face];
+  }
 }
 
 function captureCroppedSquare() {
@@ -99,7 +222,7 @@ async function onCapture() {
     const res = await fetch('/api/scan-face', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ face: currentFace(), image: capturedDataUrl }),
+      body: JSON.stringify({ face: activeFace, image: capturedDataUrl }),
     });
     if (!res.ok) throw new Error((await res.json()).detail || 'scan failed');
     const data = await res.json();
@@ -117,13 +240,18 @@ function showConfirmPanel() {
   els.capturedPhoto.src = capturedDataUrl;
   selectedStickerIndex = null;
   renderGridPreview();
+  updateDuplicateWarning();
 }
 
-function onRetake() {
+function showCamera() {
   els.confirmPanel.style.display = 'none';
   els.cameraWrap.style.display = 'block';
   els.cameraWrap.parentElement.querySelector('.controls').style.display = 'flex';
   detectedColors = null;
+}
+
+function onRetake() {
+  showCamera();
 }
 
 function renderGridPreview() {
@@ -149,6 +277,7 @@ function buildPalette() {
       if (selectedStickerIndex === null) return;
       detectedColors[selectedStickerIndex] = color;
       renderGridPreview();
+      updateDuplicateWarning();
     });
     els.palette.appendChild(btn);
   });
@@ -160,7 +289,7 @@ async function onConfirmFace() {
     const res = await fetch('/api/confirm-face', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ face: currentFace(), colors: detectedColors }),
+      body: JSON.stringify({ face: activeFace, colors: detectedColors }),
     });
     if (!res.ok) throw new Error((await res.json()).detail || 'confirm failed');
   } catch (e) {
@@ -168,18 +297,11 @@ async function onConfirmFace() {
     return;
   }
 
-  faceIndex += 1;
-  els.confirmPanel.style.display = 'none';
-  els.cameraWrap.style.display = 'block';
-  els.cameraWrap.parentElement.querySelector('.controls').style.display = 'flex';
-  detectedColors = null;
-
-  if (faceIndex >= FACE_ORDER.length) {
-    await finalizeScan();
-  } else {
-    renderFaceProgress();
-    updateInstructions();
-  }
+  capturedFaces[activeFace] = detectedColors.slice();
+  showCamera();
+  activeFace = nextUncapturedFace();
+  render();
+  if (!activeFace) await finalizeScan();
 }
 
 async function finalizeScan() {
@@ -187,6 +309,12 @@ async function finalizeScan() {
     const res = await fetch('/api/build-and-solve', { method: 'POST' });
     if (!res.ok) {
       const body = await res.json();
+      if (body.detail && body.detail.error_code === 'ERROR_COLOR_COUNT') {
+        showError('Scan looks invalid: each color should appear exactly 9 times, but it counted:',
+                  buildColorCounts());
+        els.errorBanner.append('Tap the side(s) below with the wrong colors to redo them.');
+        return;
+      }
       const msg = (body.detail && body.detail.message) || body.detail || 'validation failed';
       throw new Error(msg);
     }
@@ -195,10 +323,7 @@ async function finalizeScan() {
     document.getElementById('solve-screen').classList.add('active');
     window.initGuide(data);
   } catch (e) {
-    showError('Scan looks invalid: ' + e.message + '. Re-scan the faces you\'re least sure about, starting over.');
-    faceIndex = 0;
-    renderFaceProgress();
-    updateInstructions();
-    fetch('/api/reset', { method: 'POST' });
+    // Keep the captured sides so only the doubtful ones need redoing.
+    showError('Scan looks invalid: ' + e.message + ' Tap the side(s) below that look off to redo them.');
   }
 }

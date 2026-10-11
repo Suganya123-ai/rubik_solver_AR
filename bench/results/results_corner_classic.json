@@ -1,0 +1,19 @@
+{
+ "n": 150,
+ "results": {
+  "normal": {
+   "qbr (kkoomen)": 0.0,
+   "qbr + multi-scale (our tweak)": 0.0,
+   "rubiks-cube-tracker (dwalton76)": 2.6666666666666665,
+   "ephynes AR solver (C# port)": 4.0,
+   "ephynes + multi-scale (our tweak)": 4.0
+  },
+  "hard": {
+   "qbr (kkoomen)": 0.0,
+   "qbr + multi-scale (our tweak)": 0.0,
+   "rubiks-cube-tracker (dwalton76)": 0.0,
+   "ephynes AR solver (C# port)": 1.3333333333333333,
+   "ephynes + multi-scale (our tweak)": 1.3333333333333333
+  }
+ }
+}

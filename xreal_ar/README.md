@@ -1,43 +1,118 @@
-# Rubik's Cube Solver -- XREAL One (NRSDK/Unity) port
+# Rubik's Cube Solver -- XREAL One Pro + Eye camera
 
-A native AR port of the `rubik_solver` web app for XREAL One glasses, built
-against XREAL's NRSDK/Unity toolchain. This is a **C# code scaffold**, not a
-built app: this environment has no Unity Editor, Android SDK, or NRSDK
-installed, so nothing here has been compiled or run. Open it in Unity, wire
-up the scene as described below, and the EditMode test suite (ported from
-the original Python tests) is your first checkpoint that the port behaves
-correctly.
+Phase 2 of the project: the same live solver as the laptop page (`/live`),
+but seen through XREAL One Pro glasses. The **XREAL Eye** camera on the
+glasses streams frames over Wi-Fi to the Python server running on the laptop;
+the server does the detection, scan, solving and move tracking and sends back
+what to show. The glasses app (running on the **Beam Pro**) is a thin client:
+camera in, text out.
 
-## Read this first: hardware assumption
+```
+XREAL Eye ─► Beam Pro app ── JPEG frames (Wi-Fi, WebSocket) ──► laptop: ./run.sh --lan
+   glasses HUD ◄── move to make / ✓ / "You did U instead of L" ◄──┘
+```
 
-**Standard XREAL One hardware, as publicly documented, has 3DoF IMU head
-tracking only -- no outward-facing RGB camera an app can read frames
-from.** You confirmed your setup has a camera attached to the XREAL device
-itself, so [`NrealRgbCameraSource`](UnityProject/Assets/RubikSolverAR/Scripts/Camera/NrealRgbCameraSource.cs)
-targets NRSDK's RGB-camera API (`NRRGBCamTexture`, the same one used on
-XREAL Light and other NRSDK-supported devices that do expose a camera) --
-but that class/method surface has changed across NRSDK releases and I
-couldn't check it against your actual SDK version here. Before you rely on
-it:
+Status: the scripts below compile with no errors or warnings against stand-ins
+for the Unity and XREAL APIs, and the client logic has been run end to end
+against the real server from a test harness (scan, a wrong move re-planned,
+solved). **They have not yet been built in the Unity Editor or run on the
+device.** The three calls marked `TODO-SDK` in `XrealEyeFrameSource.cs` must be
+checked against XREAL's camera sample.
 
-1. Confirm your XREAL unit/firmware genuinely exposes an RGB camera to
-   NRSDK (check NRSDK's own camera sample scene first).
-2. Open `NrealRgbCameraSource.cs` and check the marked `// TODO verify`
-   lines against your installed NRSDK version's actual API.
-3. Until you've done that, [`PhoneCameraSource`](UnityProject/Assets/RubikSolverAR/Scripts/Camera/PhoneCameraSource.cs)
-   (the host Android phone's own camera via Unity's standard
-   `WebCamTexture`) is a confident, zero-risk fallback -- both implement
-   the same `ICubeCameraSource` interface, so swapping is a one-line change
-   in the scene (see "Scene setup" below).
+## Phase 2 scripts (`Scripts/Live/`)
 
-`NrealRgbCameraSource`'s real NRSDK calls are compiled only behind the
-`RUBIK_XREAL_NRSDK` scripting define symbol (Project Settings > Player >
-Other Settings > Scripting Define Symbols), specifically so the rest of
-this project -- all the solving/validation logic, the EditMode tests,
-`PhoneCameraSource` -- builds and runs **before** you've imported NRSDK or
-sorted out the camera question at all.
+| File | Job |
+|---|---|
+| `ILiveFrameSource.cs` | Interface: anything that can produce a JPEG frame. |
+| `WebCamFrameSource.cs` | Any `WebCamTexture` camera: the laptop webcam in the Editor, or the Beam Pro's own camera. Use this first. |
+| `XrealEyeFrameSource.cs` | The XREAL Eye via XREAL SDK 3.x (YUV textures ➜ `Shaders/YuvToRgb.shader` ➜ JPEG). Compiled only with the `RUBIK_XREAL_SDK3` define. |
+| `FrameEncoder.cs` | Downscales to 640 px wide on the GPU and JPEG-encodes. |
+| `LiveServerClient.cs` | WebSocket client for `/ws/live` ([protocol](../docs/PROTOCOL.md)). One frame in flight at a time, reconnects on its own, events raised on the main thread. |
+| `GlassesGuide.cs` | The HUD: scan instructions, the move to make, ✓ / wrong-move / lost banners, a hold-still bar, connection status. Rescans automatically (up to 2 times) when a scan has unclear stickers, since tapping stickers isn't practical in the glasses. |
 
-## What's here vs. what you build
+## Setup
+
+### 1. Laptop
+
+```
+./run.sh --lan
+```
+
+It prints the address for the glasses, e.g. `ws://192.168.1.23:8000/ws/live`.
+Laptop and Beam Pro must be on the same Wi-Fi. Check that
+`http://<laptop-ip>:8000/health` opens in the Beam Pro's browser; if not, allow
+incoming connections for Python in the macOS firewall. Some guest/office Wi-Fi
+networks block devices from talking to each other; a phone hotspot works.
+
+### 2. Unity project
+
+1. Unity 2022.3 LTS or newer with Android Build Support (check the exact
+   version in XREAL SDK 3.x's release notes).
+2. Copy `UnityProject/Assets/RubikSolverAR/` into the project's `Assets/`.
+3. Package Manager ➜ *Add package by name* ➜ `com.unity.nuget.newtonsoft-json`.
+4. Import **XREAL SDK 3.x** (for the One / One Pro, not the old NRSDK) and
+   follow its project setup.
+5. Player Settings ➜ Android ➜ *Internet Access: Require*.
+
+### 3. Test in the Editor first (no glasses)
+
+Scene:
+
+```
+LiveHost (empty GameObject)
+  WebCamFrameSource
+  LiveServerClient    serverUrl = ws://127.0.0.1:8000/ws/live
+                      frameSource = the WebCamFrameSource above
+Canvas
+  GlassesGuide        client = LiveHost's LiveServerClient
+    TitleText, MoveText (large), DetailText, StatusText    (UI Text)
+    Banner (Image) with BannerText (Text)
+    SteadyFill (Image, Type = Filled, Horizontal)
+    StartButton ➜ GlassesGuide.StartScan
+    SkipButton  ➜ GlassesGuide.SkipMove
+    RescanButton ➜ GlassesGuide.Rescan
+```
+
+Run `./run.sh` on the same laptop, press Play, then Start. It should behave
+like the `/live` page. Fix anything here before touching the device.
+
+### 4. Switch to the XREAL Eye
+
+1. Open XREAL's **RGB camera sample** for your SDK version and compare it with
+   the three `TODO-SDK` lines in `XrealEyeFrameSource.cs` (create, start, stop
+   the camera texture). Adjust if the names differ.
+2. Player Settings ➜ Scripting Define Symbols ➜ add `RUBIK_XREAL_SDK3`.
+3. Create a material from the shader `Hidden/RubikSolverAR/YuvToRgb`.
+4. On `LiveHost`, replace `WebCamFrameSource` with `XrealEyeFrameSource`, set
+   its material, and point `LiveServerClient.frameSource` at it.
+5. Set `serverUrl` to the address printed by `./run.sh --lan`.
+6. Put the Canvas in World Space, about 1 m in front and a little below eye
+   level, under the XREAL camera rig. Wire the buttons to the Beam Pro
+   screen or controller input.
+7. Build for Android and install on the Beam Pro (see "Build & deploy" below).
+
+If the picture arrives upside down, tick `flipVertically`. If colours look
+wrong (green/purple tint), U and V are swapped or stored in a different
+channel: swap `yuv[1]`/`yuv[2]` in `XrealEyeFrameSource.TryGetJpeg`, or see the
+note at the top of `YuvToRgb.shader`.
+
+### Checking it works
+
+- The HUD status line shows `Connected · NN ms`. Under ~150 ms round trip
+  is fine; much more and the hold-still bar fills slowly. Lower `sendWidth`
+  to 480 or `jpegQuality` to 70 if needed.
+- On the laptop, `/health` should show the model loaded, and the server log
+  shows each connection.
+
+## Phase 1 port (offline, kept for reference)
+
+Everything below describes the earlier on-device port of the original
+six-photo scanner (no server, no live tracking). It is not used by the live
+glasses app above, which needs only `Scripts/Live/` and `Shaders/`. It also
+predates the XREAL Eye: where it says NRSDK or that the One has no camera,
+read XREAL SDK 3.x and the Eye instead.
+
+### What's here vs. what you build
 
 | Original (`rubik_solver/`) | This port | Notes |
 |---|---|---|
@@ -63,7 +138,7 @@ as "mostly clockwise" / "mostly counter-clockwise" / "full turn"). The big
 text label (face name + CW/CCW/180) carries the precise instruction either
 way.
 
-## Why this is trustworthy (and where to double-check)
+### Why this is trustworthy (and where to double-check)
 
 The solving/validation engine (`Scripts/Core/*.cs`) is a line-by-line port
 of the Python originals -- same algorithms, same move-engine coordinate
@@ -88,7 +163,7 @@ These tests only need Unity's Editor + Test Framework package (included by
 default) -- no NRSDK, no device, no camera. Run them as your very first
 step after opening the project, before touching any hardware.
 
-## Project layout
+### Project layout
 
 ```
 xreal_ar/
@@ -114,9 +189,9 @@ There's no `.unity` scene file or prefabs here -- binary Unity assets can't
 be hand-authored reliably outside the Editor. "Scene setup" below is the
 exact hierarchy to build once you have the project open.
 
-## Setup
+### Setup
 
-### Prerequisites
+#### Prerequisites
 
 - Unity (an LTS version your NRSDK release supports -- check XREAL's NRSDK
   release notes; NRSDK has historically targeted Unity 2020.3 LTS or
@@ -130,7 +205,7 @@ exact hierarchy to build once you have the project open.
   tracker).
 - XREAL One glasses, USB-C cable.
 
-### Import this code
+#### Import this code
 
 1. Create a new Unity 3D project (or open an existing NRSDK sample
    project).
@@ -145,7 +220,7 @@ exact hierarchy to build once you have the project open.
    to scene setup -- it's much easier to debug the pure logic in isolation
    than inside a running AR scene.
 
-### Scene setup
+#### Scene setup
 
 Build this hierarchy (a plain `Canvas` in Screen Space - Camera or World
 Space, per NRSDK's recommended UI setup for its camera rig):
@@ -196,7 +271,7 @@ or just drive it from the `Active`/inactive state already described above
 via a small screen-manager script) -- deliberately not hard-coded here
 since it depends on how you've laid out your canvases.
 
-### Input mapping
+#### Input mapping
 
 Nothing in this scaffold hard-codes a specific XREAL controller/hand-
 tracking API, since that surface is even less certain than the camera
@@ -214,7 +289,7 @@ samples) and wire `Button.onClick` the normal Unity UI way, exactly as
 listed in "Scene setup" above. Upgrade to air-tap/controller-trigger input
 later without touching any of the app logic.
 
-### Build & deploy
+#### Build & deploy
 
 1. File > Build Settings > switch platform to Android.
 2. Player Settings: set minimum API level and other Android settings per
@@ -243,14 +318,14 @@ scaffold was written in, so the script itself is untested. It's a thin
 wrapper over `BuildPipeline.BuildPlayer`, so if something's off it should
 be a quick fix once you see the actual Unity error.
 
-## Building the APK via CI (no local build step)
+### Building the APK via CI (no local build step)
 
 [`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml) builds
 the APK on GitHub's servers via [game-ci/unity-builder](https://game.ci/),
 so once it's set up, every `git push` produces a fresh downloadable APK --
 no Unity build step on your own machine after the one-time setup below.
 
-### One-time local setup for CI
+#### One-time local setup for CI
 
 CI needs a *complete* Unity project (`ProjectSettings/`, `Packages/`), which
 only the Editor can generate -- this one step can't be skipped or scripted
@@ -272,7 +347,7 @@ around:
    `Library/`, `Temp/`, or `Builds/`.
 7. Push to a GitHub repo.
 
-### One-time Unity license setup
+#### One-time Unity license setup
 
 Free Unity personal licenses work fine for CI builds of a project like this:
 
@@ -291,14 +366,14 @@ Free Unity personal licenses work fine for CI builds of a project like this:
    trigger it manually) and you won't need to repeat this unless the
    license expires.
 
-### Triggering a build
+#### Triggering a build
 
 Edit `build-apk.yml`'s `unityVersion` and `UNITY_PROJECT_PATH` to match your
 setup, then push to `main` (or run it manually from the Actions tab). Once
 it finishes, the APK is attached to that workflow run under **Artifacts** --
 download it, then `adb install` it to your phone as in step 4 above.
 
-## Known limitations / things to revisit
+### Known limitations / things to revisit
 
 - **Camera source is unverified** -- see "Read this first" above. This is
   the single biggest risk in this port; everything else is a mechanical

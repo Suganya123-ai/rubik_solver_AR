@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Live Cube View</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/live.css">
+</head>
+<body>
+<div id="app" class="live-app">
+  <a class="back-link" href="/">← Scanner</a>
+  <h1>Live cube view</h1>
+  <p class="subtitle">Hold the cube corner-on so the camera sees the Top, Front and Right sides. The dots are YOLO's 7 corner points; the swatches are the colours read from each sticker.</p>
+
+  <div class="error-banner" id="error-banner"></div>
+
+  <div class="live-layout">
+    <div class="panel live-video-panel">
+      <div class="live-stage" id="live-stage">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="live-status" id="live-status">Starting camera…</div>
+      </div>
+      <div class="live-stats">
+        <span><b id="stat-fps">–</b> frames/s</span>
+        <span><b id="stat-latency">–</b> ms round trip</span>
+        <span><b id="stat-server">–</b> ms on server</span>
+        <span>confidence <b id="stat-conf">–</b></span>
+      </div>
+      <div class="controls">
+        <button class="primary" id="save-btn" disabled>Save frame</button>
+        <span class="save-count" id="save-count">0 frames saved</span>
+        <a class="secondary label-link" href="/label">Label saved frames →</a>
+      </div>
+      <p class="hint">Saved frames go to <code>data/captures/</code> with YOLO's guess as a starting label, ready for retraining on Day 3. Save a variety: different angles, distances, lighting and hand positions.</p>
+    </div>
+
+    <div class="live-side">
+    <div class="panel scan-panel" id="scan-panel">
+      <h2>Scan &amp; solve</h2>
+      <div id="scan-idle">
+        <p class="hint" style="margin-top:0">Two views read the whole cube. Each is captured automatically once you hold the cube still.</p>
+        <button class="primary" id="scan-start-btn">Start scan</button>
+      </div>
+      <div id="scan-running" hidden>
+        <div class="scan-steps"><span id="step-v1">1 · Top, Front, Right</span><span id="step-v2">2 · Bottom, Left, Back</span></div>
+        <p class="scan-instruction" id="scan-instruction"></p>
+        <div class="steady-bar"><div id="steady-fill"></div></div>
+        <p class="hint" id="scan-message">Hold the cube still…</p>
+        <button class="secondary" id="scan-cancel-btn">Cancel</button>
+      </div>
+      <div id="scan-review" hidden>
+        <p class="scan-instruction" id="review-text"></p>
+        <div class="cube-net" id="cube-net"></div>
+        <div class="net-palette" id="net-palette" hidden></div>
+        <div class="controls">
+          <button class="primary" id="review-confirm-btn">Highlighted look right</button>
+          <button class="primary" id="solve-btn" hidden>Solve</button>
+          <button class="secondary" id="rescan-btn">Scan again</button>
+        </div>
+      </div>
+      <div id="scan-guide" hidden>
+        <p class="track-banner" id="track-banner"></p>
+        <div class="guide-count" id="guide-count"></div>
+        <div class="hologram">
+          <canvas id="hologram" aria-label="3D cube showing the next move"></canvas>
+          <span class="hologram-hint">Your cube, held like this. Drag to look around.</span>
+        </div>
+        <div class="guide-move" id="guide-move"></div>
+        <p class="guide-desc" id="guide-desc"></p>
+        <div class="steady-bar"><div id="track-steady"></div></div>
+        <p class="hint">The camera checks every move. After each turn, hold the cube still for a moment, corner-on, in the first position.</p>
+        <div class="controls">
+          <button class="secondary" id="track-skip-btn">I did this move</button>
+          <button class="secondary" id="guide-rescan-btn">Scan a new cube</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel live-faces-panel">
+      <h2>Sticker colours</h2>
+      <div class="live-faces" id="live-faces"></div>
+      <p class="hint">Raw measured colours, before naming. Grey dashed squares mean the cube isn't found.</p>
+    </div>
+    </div>
+  </div>
+</div>
+<script src="/static/cube3d.js"></script>
+<script src="/static/live.js"></script>
+<script src="/static/scan_ui.js"></script>
+</body>
+</html>

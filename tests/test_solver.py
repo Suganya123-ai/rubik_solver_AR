@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cube.cube_state import solved_state
 from cube.moves import apply_moves, ALL_MOVES
-from cube.solver import MAX_SANE_MOVES, SolverError, enrich, solve
+from cube.solver import MAX_SANE_MOVES, SolverError, enrich, solve, solve_layer_by_layer
 
 
 def _check_round_trip(scramble):
@@ -73,6 +73,25 @@ def test_enrich_produces_valid_instructions():
         assert instr.total_steps == len(moves)
         assert instr.notation == moves[i]
         assert instr.direction in ('CW', 'CCW', '180')
+
+
+def test_solutions_are_short():
+    # Phase 1 step 1 acceptance: kociemba keeps random cubes to <= 22 moves.
+    lengths = []
+    for seed in range(200):
+        rng = random.Random(seed + 20_000)
+        moves, _ = _check_round_trip([rng.choice(ALL_MOVES) for _ in range(30)])
+        lengths.append(len(moves))
+    assert max(lengths) <= 22, f"longest solution {max(lengths)} moves"
+    assert sum(lengths) / len(lengths) < 22
+
+
+def test_layer_by_layer_fallback_still_solves():
+    for seed in range(20):
+        rng = random.Random(seed + 30_000)
+        s = apply_moves(solved_state(), [rng.choice(ALL_MOVES) for _ in range(25)])
+        moves, _ = solve_layer_by_layer(s)
+        assert apply_moves(s, moves) == solved_state()
 
 
 def test_invalid_scan_rejected():

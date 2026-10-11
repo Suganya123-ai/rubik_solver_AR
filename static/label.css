@@ -1,0 +1,32 @@
+.label-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.label-nav { display: flex; align-items: center; gap: 8px; }
+.label-nav button { padding: 6px 12px; }
+#position { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 70px; text-align: center; }
+
+.label-stage {
+  position: relative;
+  width: 100%;
+  background: #000;
+  border-radius: var(--radius);
+  overflow: hidden;
+  touch-action: none;
+}
+
+.label-stage img { display: block; width: 100%; height: auto; user-select: none; -webkit-user-drag: none; }
+.label-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+.label-stage canvas.dragging { cursor: grabbing; }
+
+button.danger { color: var(--bad); border-color: rgba(255, 107, 107, 0.4); }
+
+.label-h2 { font-size: 1rem; margin: 0 0 8px; }
+.kpt-guide { width: 100%; max-width: 230px; display: block; margin: 0 auto 6px; }
+.label-tips { padding-left: 18px; margin: 6px 0; font-size: 0.85rem; color: var(--text); }
+.label-tips li { margin: 5px 0; }

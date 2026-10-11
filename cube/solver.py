@@ -286,8 +286,36 @@ def solve_last_layer(state):
 
 MAX_SANE_MOVES = 400
 
+try:
+    import kociemba
+except ImportError:  # pragma: no cover - only when the C extension can't be installed
+    kociemba = None
 
-def solve(state, cross_depth=6, corner_depth=7, edge_depth=7):
+
+def solve(state):
+    """Shortest practical solution: Kociemba's two-phase algorithm (~21 moves,
+    milliseconds), so re-planning after a user's mistake is instant. Falls
+    back to the layer-by-layer solver if kociemba isn't installed."""
+    result = validate(state)
+    if not result.ok:
+        raise SolverError(f"{result.error_code}: {result.message}")
+    if kociemba is None:
+        return solve_layer_by_layer(state)
+    if state == solved_state():
+        return [], [('solved', 0)]  # kociemba returns a 13-move identity for a solved cube
+
+    # Our facelet order (U, R, F, D, L, B, each face in raster order) is exactly
+    # kociemba's cube string, and its move notation (R, R', R2) is ours.
+    try:
+        moves = kociemba.solve(''.join(state.arr)).split()
+    except ValueError as e:  # kociemba rejects states our validation tiers let through
+        raise SolverError(f"ERROR_INVALID_CUBE: {e}") from e
+    if apply_moves(state, moves) != solved_state():
+        raise SolverError("internal error: kociemba's solution does not solve the cube")
+    return moves, [('solving', len(moves))]
+
+
+def solve_layer_by_layer(state, cross_depth=6, corner_depth=7, edge_depth=7):
     result = validate(state)
     if not result.ok:
         raise SolverError(f"{result.error_code}: {result.message}")

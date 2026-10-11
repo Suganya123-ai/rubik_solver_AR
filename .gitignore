@@ -34,3 +34,17 @@ Thumbs.db
 # Secrets -- never commit these
 *.ulf
 *.keystore
+
+# Benchmarks: large local-only folders (see bench/README.md)
+bench/.venv/
+bench/third_party/
+bench/data/
+bench/runs/
+bench/reports_out/
+bench/*.pt
+
+# Frames saved from the live view (Day 3 training data)
+data/captures/
+
+# Training logs
+bench/*.log

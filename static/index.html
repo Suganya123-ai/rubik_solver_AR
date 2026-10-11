@@ -9,7 +9,7 @@
 <body>
 <div id="app">
   <h1>Rubik's Cube Solver</h1>
-  <p class="subtitle">Scan all 6 faces, then follow the guided moves to solve it.</p>
+  <p class="subtitle">Scan all 6 faces, then follow the guided moves to solve it. <a href="/live" style="color: var(--accent)">Live cube view (beta) →</a></p>
 
   <div class="error-banner" id="error-banner"></div>
 
@@ -39,9 +39,19 @@
       </div>
       <div class="grid-preview" id="grid-preview"></div>
       <div class="palette" id="palette"></div>
+      <div class="inline-warning" id="duplicate-warning"></div>
       <div class="controls">
         <button class="secondary" id="retake-btn">Retake</button>
         <button class="primary" id="confirm-btn">Confirm face</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="captured-title">Captured sides <span id="captured-count"></span> <span id="captured-hint"></span></p>
+      <div class="captured-faces" id="captured-faces"></div>
+      <div class="controls">
+        <button class="secondary" id="start-over-btn">Start over</button>
+        <button class="primary" id="solve-btn">Solve</button>
       </div>
     </div>
   </section>

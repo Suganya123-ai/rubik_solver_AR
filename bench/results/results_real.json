@@ -1,0 +1,32 @@
+{
+ "Current app (fixed grid)": {
+  "faces_read": 0,
+  "of": 6,
+  "ms_median": 0.0067920045694336295
+ },
+ "qbr (kkoomen)": {
+  "faces_read": 0,
+  "of": 6,
+  "ms_median": 3.546478495991323
+ },
+ "qbr + multi-scale (our tweak)": {
+  "faces_read": 6,
+  "of": 6,
+  "ms_median": 12.136750003264751
+ },
+ "rubiks-cube-tracker (dwalton76)": {
+  "faces_read": 6,
+  "of": 6,
+  "ms_median": 130.95047900424106
+ },
+ "ephynes AR solver (C# port)": {
+  "faces_read": 0,
+  "of": 6,
+  "ms_median": 3.0185210052877665
+ },
+ "ephynes + multi-scale (our tweak)": {
+  "faces_read": 2,
+  "of": 6,
+  "ms_median": 8.576124993851408
+ }
+}
