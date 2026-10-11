@@ -44,12 +44,35 @@ misbehaves), `?hands=off` turns it off.
 | `overlay/` | Canvas drawing: `handMesh.ts`, `cubeBox.ts`, `theme.ts`; `hud.ts` for the text parts. |
 | `appState.ts` | The app's stage (camera, scan, review, guided, undo, solved). |
 
-## Milestones
+## Using it
 
-1. **Camera + hand mesh** — done: mirrored full-screen camera, glowing hand
-   mesh, cube wireframe box with label, live readouts, "hold the cube steady
-   inside the box" hint when the cube isn't found.
-2. Face scanning (two views, guided, fix stickers).
-3. Solver + ghost cube (Three.js).
-4. Guided moves with mistake detection and undo.
-5. Polish: HUD details, picture-in-picture, heartbeat + confetti, stats.
+1. **Start scan** (or ). Hold the cube corner-on so three sides show; it
+   captures by itself when you hold still ("✓ Side 1 of 2 captured" + beep).
+   Flip it as shown for side 2.
+2. **Check colours**: a cube net appears; highlighted stickers were unclear --
+   tap one to fix its colour, or confirm (). Then **Solve**.
+3. **Hold the cube like in the first scan.** Each move is shown as a green
+   arrow on your cube, played on the ghost cube beside it, and written out by
+   the side's centre colour ("Turn the blue side clockwise", looking straight
+   at that side). Do it and hold still: ✓ and the next move.
+4. **Wrong move**: the hand mesh turns red, the ghost cube shows ⚠, and
+   "Undo the step" shows the turn that reverses it (red-orange arrow). Undo
+   it and the same plan carries on. *New plan instead* () solves again
+   from where the cube is.
+5. **Solved**: heartbeat line, confetti, and your time / moves / mistakes.
+
+Keys:  scan,  confirm/solve,  or  "I did it" (if the
+camera missed a move),  new plan,  stop.
+
+Why colours instead of letters: the webcam faces you, so the camera's
+"Front" is the side facing away from you. A side's centre colour never
+changes, so "the blue side" means the same from every angle.
+
+## Status
+
+- Done: camera + hand mesh, scanning, solving, ghost cube, guided moves with
+  mistake detection and undo, solved screen. Tested end to end with a
+  simulated camera (scan, a wrong move, its undo, solved).
+- Next (polish): HUD leader-line labels and picture-in-picture inset from the
+  reference video, a Three.js ghost cube (the current one is the demo's
+  canvas renderer), and tuning on your real camera.

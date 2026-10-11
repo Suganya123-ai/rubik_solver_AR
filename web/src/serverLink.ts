@@ -40,12 +40,18 @@ export class ServerLink {
   private frameId = 0;
   private replies: number[] = [];
   private canvas = document.createElement('canvas');
+  private queue: string[] = [];  // commands sent before the connection opened
 
   connect(): void {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}/ws/live`);
     ws.binaryType = 'arraybuffer';
-    ws.onopen = () => { this.connected = true; this.inFlight = false; this.onConnection(true); };
+    ws.onopen = () => {
+      this.connected = true;
+      this.inFlight = false;
+      for (const command of this.queue.splice(0)) ws.send(command);
+      this.onConnection(true);
+    };
     ws.onclose = () => {
       this.connected = false;
       this.inFlight = false;
@@ -76,7 +82,9 @@ export class ServerLink {
   }
 
   send(command: Record<string, unknown>): void {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(command));
+    const text = JSON.stringify(command);
+    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(text);
+    else this.queue.push(text);  // delivered as soon as the connection opens
   }
 
   private receive(msg: Message): void {
