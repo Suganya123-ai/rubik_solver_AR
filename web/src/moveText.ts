@@ -8,20 +8,26 @@
 // Front (toward the camera). The user is at -z looking toward +z, so the
 // user's right is -x.
 
+import { glasses } from './mode';
+
+// On the glasses the camera looks the wearer's way, so the camera's view IS the
+// user's view: Front faces the user, Right is on the user's right.
+
 type V = [number, number, number];
 const LAYER: Record<string, [number, number]> = { U: [1, 1], D: [1, -1], F: [2, 1], B: [2, -1], R: [0, 1], L: [0, -1] };
 
 /** Where each side is, from the user's seat. */
-export const POSITION: Record<string, string> = {
-  U: 'on top', D: 'underneath', F: 'facing the camera', B: 'facing you', R: 'on your left', L: 'on your right',
-};
+export const POSITION: Record<string, string> = glasses
+  ? { U: 'on top', D: 'underneath', F: 'facing you', B: 'at the back', R: 'on your right', L: 'on your left' }
+  : { U: 'on top', D: 'underneath', F: 'facing the camera', B: 'facing you', R: 'on your left', L: 'on your right' };
 
 // For each side, a point on its layer the user can see, and what to call it.
+const NEAR = glasses ? 1 : -1;  // which way along z is "nearest you"
 const REFERENCE: Record<string, [V, string]> = {
-  U: [[0, 1, -1], 'the edge nearest you'],
-  D: [[0, -1, -1], 'the edge nearest you'],
-  R: [[1, 0, -1], 'the edge nearest you'],
-  L: [[-1, 0, -1], 'the edge nearest you'],
+  U: [[0, 1, NEAR], 'the edge nearest you'],
+  D: [[0, -1, NEAR], 'the edge nearest you'],
+  R: [[1, 0, NEAR], 'the edge nearest you'],
+  L: [[-1, 0, NEAR], 'the edge nearest you'],
   F: [[0, 1, 1], 'its top edge'],
   B: [[0, 1, -1], 'its top edge'],
 };
@@ -30,7 +36,7 @@ const cross = (a: V, b: V): V => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] 
 
 /** Which way a motion (cube axes) goes for the user. */
 function direction(t: V): string {
-  const right = -t[0], up = t[1], toward = -t[2];
+  const right = glasses ? t[0] : -t[0], up = t[1], toward = glasses ? t[2] : -t[2];
   const best = [[Math.abs(right), right > 0 ? 'to your right' : 'to your left'],
     [Math.abs(up), up > 0 ? 'up' : 'down'],
     [Math.abs(toward), toward > 0 ? 'toward you' : 'away from you']] as [number, string][];
@@ -63,5 +69,7 @@ export function sentence(move: string, faceColours: Record<string, string>): str
 /** How to hold the cube, from the user's seat. */
 export function holdHint(faceColours: Record<string, string>): string {
   const c = faceColours;
-  return `Hold it with ${c.U} on top and ${c.F} facing the camera (${c.B} facing you, ${c.R} on your left).`;
+  return glasses
+    ? `Hold it with ${c.U} on top, ${c.F} facing you and ${c.R} on your right.`
+    : `Hold it with ${c.U} on top and ${c.F} facing the camera (${c.B} facing you, ${c.R} on your left).`;
 }

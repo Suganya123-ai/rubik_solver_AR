@@ -124,3 +124,19 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); overf
 
 /* several colour swatches in the card chip (side 1's centres during scan 2) */
 .chip i + i { margin-left: 4px; }
+
+/* ---------- glasses (branch xreal-glasses) ---------- */
+/* The camera looks the wearer's way: not mirrored. */
+body.glasses #video { transform: none; }
+/* Floating display only: no camera picture and a black ground, which is invisible on see-through glasses. */
+body.hud-only #video { visibility: hidden; }
+body.hud-only .hud-target, body.hud-only .hud-stats { display: none; }
+body.hud-only #ghost { background: none; border-color: transparent; }
+#controls { position: absolute; right: 16px; top: 16px; display: flex; gap: 8px; align-items: center;
+  font: 12px var(--mono); color: var(--ink); background: rgba(6, 14, 20, .6); border: 1px solid rgba(94, 230, 255, .35);
+  border-radius: 10px; padding: 6px 10px; }
+#controls[hidden] { display: none; }
+#controls select, #controls button { font: inherit; color: var(--ink); background: rgba(255, 255, 255, .08);
+  border: 1px solid rgba(255, 255, 255, .25); border-radius: 8px; padding: 5px 8px; max-width: 46vw; }
+body.glasses .turning { top: 64px; }  /* below the camera chooser */
+@media (max-width: 900px) { #controls { right: 8px; top: 8px; } }

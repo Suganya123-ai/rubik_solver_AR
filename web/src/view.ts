@@ -1,6 +1,8 @@
 // Where things in the camera picture land on screen. The video fills the
-// screen (cropped, like object-fit: cover) and is mirrored, so the picture
-// moves like a mirror. Everything drawn on top goes through these mappings.
+// screen (cropped, like object-fit: cover). With a camera facing the user
+// (laptop) it is mirrored, so the picture moves like a mirror; on the glasses
+// the camera looks the wearer's way and nothing is mirrored. Everything drawn
+// on top goes through these mappings.
 
 export type Pt = [number, number];
 
@@ -12,6 +14,8 @@ export class View {
   private ox = 0;
   private oy = 0;
   private vw = 1;
+  /** Mirror left-right (camera facing the user). */
+  mirror = true;
 
   update(videoW: number, videoH: number, screenW: number, screenH: number): void {
     this.w = screenW;
@@ -22,9 +26,9 @@ export class View {
     this.oy = (screenH - videoH * this.scale) / 2;
   }
 
-  /** A point in video pixels -> screen (mirrored). */
+  /** A point in video pixels -> screen. */
   fromVideo([x, y]: Pt): Pt {
-    return [this.ox + (this.vw - x) * this.scale, this.oy + y * this.scale];
+    return [this.ox + (this.mirror ? this.vw - x : x) * this.scale, this.oy + y * this.scale];
   }
 
   /** A MediaPipe point (0..1 of the video) -> screen. */

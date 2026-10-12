@@ -13,6 +13,7 @@ export type FrameReply = {
   confident: boolean;
   faces: Record<'U' | 'F' | 'R', [number, number, number][]> | null;
   covered: Record<'U' | 'F' | 'R', boolean[]> | null;
+  hands?: { points: [number, number][] }[];
   hands_busy?: boolean;
   scan?: Record<string, unknown>;
   scan_result?: Record<string, unknown>;

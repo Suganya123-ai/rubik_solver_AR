@@ -32,6 +32,11 @@ Then open **<http://localhost:5173>** and allow the camera.
 **Using it**, step by step (scan, check colours, follow the moves, undo a
 mistake): see **[README_WEBCAM.md](README_WEBCAM.md)**.
 
+**On the XREAL glasses** (this branch, `xreal-glasses`): the same app opened
+in the Beam Pro's browser, with the camera looking your way. See
+**[README_GLASSES.md](README_GLASSES.md)**: `./run_glasses.sh`, then open the
+address it prints on the Beam Pro.
+
 ### What's in this repository
 
 | | Webcam AR app (this branch's main work) | Original demo |

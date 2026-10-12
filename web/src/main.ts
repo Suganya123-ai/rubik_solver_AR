@@ -5,7 +5,7 @@
 
 import './style.css';
 import { AppState } from './appState';
-import { startCamera } from './camera';
+import { currentCameraId, listCameras, startCamera } from './camera';
 import { CubeView } from './cubeView';
 import { HandTracking } from './handTracking';
 import { Flow } from './flow';
@@ -14,6 +14,7 @@ import { Effects } from './overlay/effects';
 import { drawMoveArrows } from './overlay/moveArrows';
 import { drawHands } from './overlay/handMesh';
 import { Hud } from './overlay/hud';
+import { glasses, handsMode, hudOnly, setHudOnly } from './mode';
 import { ServerLink } from './serverLink';
 import { View } from './view';
 
@@ -30,9 +31,11 @@ const effects = new Effects();
 const flow = new Flow(link, state, effects, document.getElementById('ui')!);
 const ghostBox = document.getElementById('ghost')!;
 const ghost = new window.CubeHologram(document.getElementById('ghost-canvas') as HTMLCanvasElement);
-// Seen from the user's side: the webcam looks at the cube from the other side,
-// so the ghost is turned round (green facing the user is in front) and not mirrored.
-ghost.homeYaw = ghost.yaw = -0.68 + Math.PI;
+// Laptop: the webcam looks at the cube from the other side, so the ghost is turned
+// round to the user's side. Glasses: the camera looks the wearer's way, so no turn.
+ghost.homeYaw = ghost.yaw = glasses ? -0.68 : -0.68 + Math.PI;
+view.mirror = !glasses;
+document.body.classList.toggle('glasses', glasses);
 let ghostPos: [number, number, number] | null = null;
 
 const HINT_AFTER_MS = 800; // no confident cube for this long: show the "hold it steady" hint
@@ -43,6 +46,9 @@ link.onFrame = (reply) => {
   const now = performance.now();
   cube.update(reply, now);
   if (reply.confident) lastConfident = now;
+  if (handsMode === 'off' && reply.hands) {  // draw the server's hand points instead
+    hands.hands = reply.hands.map((h) => ({ points: h.points.map(([x, y]) => [x / reply.width, y / reply.height] as [number, number]) }));
+  }
   flow.onFrame(reply);
   updateGhost();
 };
@@ -91,6 +97,36 @@ function faceOn(c: [number, number][]): boolean {
   return Math.min(...sides) < 0.5 * Math.max(...sides);  // real frames: good 0.6-0.8, missed moves 0.36-0.45
 }
 
+// ---------- glasses controls: which camera, and camera picture vs floating HUD ----------
+async function setupControls(): Promise<void> {
+  const box = document.getElementById('controls')!;
+  const select = document.getElementById('camera-select') as HTMLSelectElement;
+  const toggle = document.getElementById('hud-toggle') as HTMLButtonElement;
+  const fill = async () => {
+    const cameras = await listCameras();
+    select.innerHTML = '';
+    for (const c of cameras) {
+      const o = document.createElement('option');
+      o.value = c.id; o.textContent = c.label;
+      o.selected = c.id === currentCameraId();
+      select.appendChild(o);
+    }
+    box.hidden = false;
+  };
+  select.onchange = async () => {
+    try { await startCamera(video, select.value); } catch (e) { hud.say(`Couldn't open that camera: ${(e as Error).message}`); }
+    await fill();
+  };
+  const applyHud = () => {
+    document.body.classList.toggle('hud-only', hudOnly);
+    toggle.textContent = hudOnly ? 'Show camera picture' : 'Floating display only';
+  };
+  toggle.onclick = () => { setHudOnly(!hudOnly); applyHud(); };
+  applyHud();
+  navigator.mediaDevices.addEventListener?.('devicechange', fill);
+  await fill();
+}
+
 function resize(): void {
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(innerWidth * dpr);
@@ -109,14 +145,15 @@ function frame(now: number): void {
   let corners: [number, number][] | null = null;
   if (cube.keypoints && alpha > 0) {
     corners = cube.keypoints.map((p) => view.fromFrame(p, cube.frameW));
-    drawCubeBox(ctx, corners, alpha * (flow.guide ? 0.5 : 1), `CUBE ${Math.round(cube.confidence * 100)}%`);
-    if (flow.guide && alpha > 0.5) {
+    // HUD-only: there is no camera picture to draw on, so nothing is drawn on the cube.
+    if (!hudOnly) drawCubeBox(ctx, corners, alpha * (flow.guide ? 0.5 : 1), `CUBE ${Math.round(cube.confidence * 100)}%`);
+    if (!hudOnly && flow.guide && alpha > 0.5) {
       drawMoveArrows(ctx, view, cube.keypoints, cube.frameW, flow.guide.move, flow.guide.undo, now);
     }
   }
-  drawHands(ctx, hands.hands, view, video.videoHeight || 720, state.error);
-  effects.draw(ctx, now, corners, innerWidth, innerHeight);
-  placeGhost(alpha > 0.5 ? corners : null);
+  if (!hudOnly) drawHands(ctx, hands.hands, view, video.videoHeight || 720, state.error);
+  effects.draw(ctx, now, hudOnly ? null : corners, innerWidth, innerHeight);
+  placeGhost(!hudOnly && alpha > 0.5 ? corners : null);
 
   frames.push(now);
   while (frames.length && now - frames[0] > 1000) frames.shift();
@@ -140,12 +177,13 @@ async function boot(): Promise<void> {
   }
   hud.say('Loading hand tracking…');
   try {
-    await hands.init(new URLSearchParams(location.search).get('hands') ?? 'gpu');
+    await hands.init(handsMode);
   } catch (e) {
     console.error(e);
     hud.say('Hand tracking unavailable in this browser; carrying on without it.');
   }
   hud.say('');
+  setupControls();
   link.connect();  // (the flow already set the stage; the user may have pressed Start scan meanwhile)
   requestAnimationFrame(frame);
 }
