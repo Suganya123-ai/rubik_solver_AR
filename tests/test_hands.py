@@ -106,3 +106,15 @@ def test_a_finger_behind_the_cube_does_not_cover_a_sticker():
     assert not covered_stickers(KPTS, [hand], frame, faces)['F'][4]
     faces['F'][4] = (130, 90, 60)                                   # now it reads as skin
     assert covered_stickers(KPTS, [hand], frame, faces)['F'][4]
+
+
+def test_a_hidden_finger_jumping_around_is_not_turning():
+    # MediaPipe's guesses for fingers behind the cube jump about; that alone isn't a turn.
+    busy = BusyHands()
+    hand = _finger_over('F', 4)
+    rng = np.random.default_rng(1)
+    for i in range(20):
+        pts = [list(p) for p in hand['points']]
+        pts[8] = [pts[8][0] + rng.normal(0, 60), pts[8][1] + rng.normal(0, 60)]   # index tip jumping
+        pts[12] = [pts[12][0] + rng.normal(0, 60), pts[12][1] + rng.normal(0, 60)]  # middle tip too
+        assert not busy.update([{'points': pts}], KPTS, 0.05 * i)

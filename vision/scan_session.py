@@ -44,8 +44,9 @@ class ScanSession:
         if self.result is not None:
             return {**self.status(), 'event': None}
         kpts, faces = frame_result.get('keypoints'), frame_result.get('faces')
-        if not (kpts and frame_result.get('confident') and faces and all(None not in faces[f] for f in 'UFR')) \
-                or frame_result.get('hands_busy'):  # (hands turning the cube: wait until they stop)
+        # (Hands turning the cube aren't checked here: the cube's corners must be
+        # still for a capture anyway, and a false "turning" blocked captures.)
+        if not (kpts and frame_result.get('confident') and faces and all(None not in faces[f] for f in 'UFR')):
             self._reset_steady()
             return {**self.status(), 'event': None}
         k = np.asarray(kpts, float)

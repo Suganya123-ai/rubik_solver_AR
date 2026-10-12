@@ -26,6 +26,7 @@ log = logging.getLogger('rubik.live')
 MAX_FRAME_BYTES = 2_000_000
 LOG_EVERY_S = 5.0     # while scanning/solving: a one-line summary of what the camera saw
 SESSION_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'sessions')
+SCAN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'scans')
 MAX_RECORDED_FRAMES = 600
 
 
@@ -76,6 +77,7 @@ class LiveClient:
         self.track = None         # TrackSession while solving
         self.busy = BusyHands()   # are the hands turning the cube right now?
         self.recorder = None      # SessionRecorder while solving
+        self._scan_dir = None     # where the current scan's views are recorded
         self._seen = {}           # frame counts since the last log line
         self._logged_at = time.monotonic()
 
@@ -93,6 +95,8 @@ class LiveClient:
         self._note(result)
         if self.scan is not None:
             result['scan'] = self.scan.feed(result)
+            if result['scan']['event'] in ('captured', 'done'):
+                self._record_scan_view(jpeg, result)
             if result['scan']['event'] == 'done':
                 self.scan_rgbs = assemble(self.scan.readings)
                 result['scan_result'] = _scan_json(self.scan.result)
@@ -110,6 +114,26 @@ class LiveClient:
                                          'move': result['track'].get('move')})
         result['frame'] = frame_id
         return result
+
+    def _record_scan_view(self, jpeg, result):
+        """Saves each captured scan view (the frame, its corners and the colours
+        read) to data/scans/<day>/<time>/, so a wrong scan can be looked at.
+        Local files only; RUBIK_RECORD=0 turns it off."""
+        if os.environ.get('RUBIK_RECORD', '1') == '0':
+            return
+        view = 1 if result['scan']['event'] == 'captured' else 2
+        if view == 1 or self._scan_dir is None:
+            self._scan_dir = os.path.join(SCAN_DIR, datetime.now().strftime('%Y-%m-%d'), datetime.now().strftime('%H%M%S'))
+            os.makedirs(self._scan_dir, exist_ok=True)
+        with open(os.path.join(self._scan_dir, f'view{view}.jpg'), 'wb') as fh:
+            fh.write(jpeg)
+        record = {'view': view, 'keypoints': result.get('keypoints'), 'reading': self.scan.readings.get(view),
+                  'frame_faces': result.get('faces'), 'covered': result.get('covered')}
+        if view == 2 and self.scan.result is not None:
+            record['result'] = _scan_json(self.scan.result)
+        with open(os.path.join(self._scan_dir, 'scan.jsonl'), 'a') as fh:
+            fh.write(json.dumps(record, default=float) + '\n')
+        log.info('%s: scan view %d recorded to %s', self.name, view, self._scan_dir)
 
     def _note(self, result):
         """Counts what the camera saw and logs a summary every few seconds while

@@ -28,12 +28,14 @@ BONES = [(0, 1), (1, 2), (2, 3), (3, 4), (0, 5), (5, 6), (6, 7), (7, 8), (5, 9),
          (9, 13), (13, 14), (14, 15), (15, 16), (13, 17), (0, 17), (17, 18), (18, 19), (19, 20)]
 PALM = [0, 1, 5, 9, 13, 17]
 FINGER_REACH = 0.45   # a sticker may be covered if a finger bone passes within this many sticker widths of its centre...
-SKIN_DELTA_E = 18     # ...and it is covered if its colour is this close to the hand's skin colour
+SKIN_DELTA_E = 10     # ...and it is covered if its colour is this close to the hand's skin colour
+                      # (18 was too loose: in warm light an orange sticker is ~18 from skin)
 # (MediaPipe also guesses fingers hidden *behind* the cube; in the picture those
 # lie across the stickers, so position alone over-marks. On real frames, stickers
 # under such hidden fingers were >= 28 from skin colour, real skin < 15.)
-TURN_MOTION = 0.25    # a fingertip moving this far relative to the cube (in cube sizes)...
-TURN_WINDOW_S = 0.4   # ...within this long = turning (holding and shaking the cube moves tips < 0.05)
+TURN_MOTION = 0.2     # the hand's points moving this far relative to the cube (median, in cube sizes)...
+TURN_WINDOW_S = 0.4   # ...within this long = turning. The median ignores fingers hidden behind the cube,
+                      # whose guessed positions jump around (one jumping fingertip made every frame "turning").
 BUSY_HOLD_S = 0.35    # it counts as turning for this long after the last such movement
 
 
@@ -130,15 +132,15 @@ def covered_stickers(kpts, hands, frame=None, faces=None):
 class BusyHands:
     """Per connection: are the hands turning the cube right now?
 
-    Fingertips are measured relative to the cube (its centre and size), so a
-    hand that just holds the cube -- and shakes with it -- doesn't count; a
-    turn moves the fingertips a good part of the cube's width relative to it
-    within a fraction of a second. A short hold makes one turn one busy stretch."""
-
-    TIPS = [4, 8, 12, 16, 20]
+    The hand's 21 points are measured relative to the cube (its centre and
+    size), so a hand that just holds the cube -- and shakes with it -- doesn't
+    count. A turn moves the whole hand relative to the cube, so the *median*
+    point movement is used: fingers hidden behind the cube (whose guessed
+    positions jump around) can't trigger it on their own. A short hold makes
+    one turn one busy stretch."""
 
     def __init__(self):
-        self._history = []          # [(time, [fingertips relative to the cube, per hand])]
+        self._history = []          # [(time, [hand points relative to the cube])]
         self._busy_until = -1.0
 
     def update(self, hands, kpts, now):
@@ -149,17 +151,17 @@ class BusyHands:
         centre = k.mean(axis=0)
         size = float(np.mean(np.linalg.norm(k[1:] - k[0], axis=1))) or 1.0
         lo, hi = k.min(axis=0) - 0.5 * size, k.max(axis=0) + 0.5 * size
-        tips = []
+        current = []
         for h in hands:
             p = np.asarray(h['points'], float)
-            if np.any(np.all((p[self.TIPS] >= lo) & (p[self.TIPS] <= hi), axis=1)):  # a hand at the cube
-                tips.append((p[self.TIPS] - centre) / size)
-        self._history = [(t, v) for t, v in self._history if now - t <= TURN_WINDOW_S] + [(now, tips)]
+            if np.any(np.all((p >= lo) & (p <= hi), axis=1)):  # a hand at the cube
+                current.append((p - centre) / size)
+        self._history = [(t, v) for t, v in self._history if now - t <= TURN_WINDOW_S] + [(now, current)]
         for _, old in self._history[:-1]:
-            for hand in tips:
+            for hand in current:
                 for prev in old:
-                    if np.linalg.norm(prev[1] - hand[1]) > 0.6:  # (index tips far apart: a different hand)
+                    if np.linalg.norm(prev[0] - hand[0]) > 0.6:  # wrists far apart: a different hand
                         continue
-                    if np.max(np.linalg.norm(hand - prev, axis=1)) > TURN_MOTION:
+                    if np.median(np.linalg.norm(hand - prev, axis=1)) > TURN_MOTION:
                         self._busy_until = now + BUSY_HOLD_S
         return now < self._busy_until
