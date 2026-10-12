@@ -48,3 +48,7 @@ data/captures/
 
 # Training logs
 bench/*.log
+
+# Solving sessions and scan recordings (camera frames; local diagnostics only)
+data/sessions/
+data/scans/
