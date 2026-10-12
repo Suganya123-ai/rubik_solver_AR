@@ -20,10 +20,10 @@ export class HandTracking {
   /** mode: 'gpu' (default, falls back to CPU), 'cpu', or 'off' (URL ?hands=...). */
   async init(mode: string = 'gpu'): Promise<void> {
     if (mode === 'off') return;
-    const fileset = await FilesetResolver.forVisionTasks('/mediapipe/wasm');
+    const fileset = await FilesetResolver.forVisionTasks(`${import.meta.env.BASE_URL}mediapipe/wasm`);
     const make = (delegate: 'GPU' | 'CPU') =>
       HandLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: '/models/hand_landmarker.task', delegate },
+        baseOptions: { modelAssetPath: `${import.meta.env.BASE_URL}models/hand_landmarker.task`, delegate },
         runningMode: 'VIDEO',
         numHands: 2,
         minHandDetectionConfidence: 0.5,

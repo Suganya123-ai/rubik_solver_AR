@@ -11,6 +11,7 @@ const server = process.env.RUBIK_SERVER ?? 'http://127.0.0.1:8200';
 const https = process.env.RUBIK_HTTP !== '1';
 
 export default defineConfig({
+  base: './',           // the built app is served from /glasses/ by glasses_server.py
   plugins: https ? [basicSsl()] : [],
   server: {
     host: true,          // reachable from the Beam Pro on the same Wi-Fi

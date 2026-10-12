@@ -12,7 +12,7 @@ glasses ◄── Beam Pro ◄────────── guidance ───�
 
 This branch is separate: the webcam demo (branch `ar-webcam`, port 5173) and
 the original demo (`live-solver`, port 8000) are not changed. It uses its own
-ports (8200 and 5273), so it can run at the same time as the webcam demo.
+port (5273), so it can run at the same time as the webcam demo.
 
 ## What is different from the webcam app
 
@@ -37,7 +37,10 @@ cd rubik_solver_AR
 ./run_glasses.sh
 ```
 
-It prints an address like `https://192.168.1.23:5273`.
+It builds the web app, then prints an address like
+`https://192.168.1.23:5273/glasses/`. One program (the Python server) does
+the vision and serves the page; it is the program macOS's firewall normally
+already allows, so the Beam Pro can reach it.
 
 ### On the Beam Pro, over Wi-Fi
 
@@ -49,16 +52,17 @@ It prints an address like `https://192.168.1.23:5273`.
 4. Allow the camera when asked.
 5. Top right, open the **Camera** list and pick the camera to use (see below).
 
-If the page does not load: allow incoming connections for `node` in the
-laptop's firewall. Some guest or office Wi-Fi networks stop devices talking
-to each other; a phone hotspot works.
+If the page does not load: check both devices are on the same Wi-Fi, and
+that the laptop's firewall allows incoming connections for Python. Hotel,
+guest and office Wi-Fi networks often stop devices talking to each other: use
+a phone hotspot for both, or the USB way below.
 
 ### Or by USB (no Wi-Fi needed, no certificate warning)
 
 1. On the Beam Pro, turn on **Developer options ▸ USB debugging**.
 2. Plug the Beam Pro into the laptop (its second USB-C port; the glasses use the other).
 3. On the laptop: `./run_glasses.sh --usb` (needs `adb`, from Android platform-tools).
-4. On the Beam Pro open `http://localhost:5273`.
+4. On the Beam Pro open `http://localhost:5273/glasses/`.
 
 ## Which camera? (the thing to find out first)
 
@@ -97,8 +101,16 @@ buttons on the card.
 
 ## Status
 
-- Tested on the laptop over https with a simulated camera: scan, a wrong move,
-  its undo, solved; both views.
+- Tested on the laptop with a simulated camera, opened through the laptop's
+  Wi-Fi address over https (the way the Beam Pro reaches it): scan, a wrong
+  move, its undo, solved; both views.
 - **Not yet tried on a Beam Pro or in the glasses.** Unknown until then:
   whether Chrome lists the Eye camera, and how many frames per second the
   Beam Pro manages over your Wi-Fi.
+
+## For development
+
+`cd web && npx vite` runs the web app with live reload on port 5273 (it
+expects the vision server on port 8200: `uvicorn main:app --port 8200`). On
+macOS the firewall may hold back `node` for other devices until you allow it,
+which is why `run_glasses.sh` serves the built app from Python instead.

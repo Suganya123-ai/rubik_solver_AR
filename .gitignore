@@ -52,3 +52,6 @@ bench/*.log
 # Solving sessions and scan recordings (camera frames; local diagnostics only)
 data/sessions/
 data/scans/
+
+# Self-signed certificate for serving the glasses app over https (made by run_glasses.sh)
+.certs/
