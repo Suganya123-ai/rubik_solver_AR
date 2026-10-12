@@ -11,7 +11,7 @@ import time
 import numpy as np
 
 from cube.color_detect import color_feature
-from cube.scan import VIEW_INSTRUCTIONS, assemble, scan_result
+from cube.scan import VIEW_INSTRUCTIONS, scan_any_hold
 
 STEADY_FRAMES = 3      # and STEADY_SECONDS: time decides (at a normal 15 frames/s that's 6+ frames);
                        # a slow link (e.g. a forwarded port, ~4 frames/s) only needs 3
@@ -33,6 +33,8 @@ class ScanSession:
         self._steady_since = None
         self._captured_at = None
         self.result = None
+        self.rgbs = None          # {face: [9 rgb]} once both views are in
+        self.rejected = None      # the last view-2 reading refused as "seen before" (for the recording)
 
     def _steady_progress(self):
         return _progress(self._buffer, self._steady_since, self._now)
@@ -41,7 +43,9 @@ class ScanSession:
         return {'phase': 'done' if self.result else f'view{self.view}',
                 'instruction': None if self.result else VIEW_INSTRUCTIONS[self.view],
                 'steady': self._steady_progress(), 'needed': 10, 'message': message,
-                'captured': sorted(self.readings)}
+                'captured': sorted(self.readings),
+                # side 1's centre colours: the sides that must *not* face the camera for side 2
+                'scanned_centres': [[round(v) for v in self.readings[1][f][4]] for f in 'UFR'] if 1 in self.readings else []}
 
     def feed(self, frame_result, now=None):
         """frame_result: the live view's per-frame result. Returns a status
@@ -72,17 +76,23 @@ class ScanSession:
 
         reading = {f: [_uncovered_median(self._buffer, f, i) for i in range(9)] for f in 'UFR'}
         self._reset_steady()
-        if self.view == 2 and self._shares_a_side_with_view1(reading):
-            # Still the first side: expected for a moment while they get ready to flip.
+        repeated = self._side_seen_before(reading) if self.view == 2 else None
+        if repeated:
+            # A side from view 1 is showing again. Right after the capture that's just the user
+            # getting ready to turn the cube; after that, say which side it is.
             flipping = self._captured_at is not None and now - self._captured_at < FLIP_GRACE_S
-            message = None if flipping else 'That looks like the first view again. Flip the cube as shown.'
-            return {**self.status(message), 'event': None}
+            self.rejected = reading
+            where = {'U': 'on top', 'F': 'on the left', 'R': 'on the right'}[repeated]
+            message = None if flipping else (
+                f'The side {where} was already scanned. Turn the cube so the three sides you have not shown '
+                'face the camera: the corner that pointed away from the camera should point at it.')
+            return {**self.status(message), 'event': None, 'repeated': repeated}
         self.readings[self.view] = reading
         if self.view == 1:
             self.view = 2
             self._captured_at = now
             return {**self.status('Side 1 captured. Now flip the cube.'), 'event': 'captured'}
-        self.result = scan_result(assemble(self.readings))
+        self.rgbs, self.result = scan_any_hold(self.readings)
         return {**self.status('Both views captured.'), 'event': 'done'}
 
     def _reset_steady(self):
@@ -90,19 +100,22 @@ class ScanSession:
         self._last_kpts = None
         self._steady_since = None
 
-    def _shares_a_side_with_view1(self, reading):
-        """A correct flip shows three new sides. Any view-2 side whose 8 outer
-        stickers match a view-1 side (turned any way) means the cube wasn't
-        flipped, or only half-flipped. Centres are left out: a logo or
-        glossy centre cap can make two different centres look alike."""
+    def _side_seen_before(self, reading):
+        """A correct turn shows three new sides. Returns the picture position
+        ('U' top, 'F' left, 'R' right) of a view-2 side whose 8 outer stickers
+        match a view-1 side (turned any way), else None. Centres are left
+        out: a logo or glossy centre cap can make two different centres look alike."""
         first = [_outer_ring(self.readings[1][f]) for f in 'UFR']
         for f in 'UFR':
             ring = _outer_ring(reading[f])
             for old in first:
                 for turn in range(4):  # a quarter turn of a side moves its ring by 2
                     if np.mean(np.linalg.norm(ring - np.roll(old, 2 * turn, axis=0), axis=1)) < SAME_SIDE_DISTANCE:
-                        return True
-        return False
+                        return f
+        return None
+
+    def _shares_a_side_with_view1(self, reading):
+        return self._side_seen_before(reading) is not None
 
 
 def _uncovered_median(buffer, face, i):

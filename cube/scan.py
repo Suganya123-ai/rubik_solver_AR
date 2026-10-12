@@ -29,8 +29,8 @@ VIEW_ROTATIONS = {
 }
 VIEW_INSTRUCTIONS = {
     1: 'Hold the cube corner-on so the camera sees its Top, Front and Right sides.',
-    2: 'Turn the cube upside down (top and bottom swap, front and back swap), then a quarter turn so '
-       'the old Left side faces the camera. The camera now sees the Bottom, Left and Back.',
+    2: 'Now show the three sides you have not shown yet: turn the cube so the corner that was pointing '
+       'away from the camera points at it.',
 }
 OPPOSITE_COLOR = {'white': 'yellow', 'yellow': 'white', 'red': 'orange', 'orange': 'red',
                   'green': 'blue', 'blue': 'green'}
@@ -48,10 +48,11 @@ def _facelet_index(pos, normal):
     raise ValueError((pos, normal))
 
 
-def view_facelets(view):
+def view_facelets(view, rotation=None):
     """The 27 cube facelet indices seen in `view`, in the reader's order
-    (picture Top 0-8, Front 0-8, Right 0-8)."""
-    back = VIEW_ROTATIONS[view].T  # view -> cube coordinates
+    (picture Top 0-8, Front 0-8, Right 0-8). rotation: how the cube is held
+    (default: VIEW_ROTATIONS[view])."""
+    back = (VIEW_ROTATIONS[view] if rotation is None else rotation).T  # view -> cube coordinates
     out = []
     for vface in VIEW_FACES:
         for k in range(9):
@@ -68,13 +69,32 @@ def view_center_faces(view):
     return [FACES[idx[9 * i + 4] // 9] for i in range(3)]
 
 
-def assemble(view_readings):
+def _view2_holds():
+    """The 3 ways of holding the cube that show the Bottom, Left and Back (the
+    corner opposite view 1) -- one for each side that can be on top."""
+    out = []
+    for axes in itertools.permutations(range(3)):
+        for signs in itertools.product((1, -1), repeat=3):
+            m = np.zeros((3, 3), int)
+            for row, (col, sign) in enumerate(zip(axes, signs)):
+                m[row, col] = sign
+            if round(np.linalg.det(m)) == 1 and set(_centres_seen(m)) == {'D', 'L', 'B'}:
+                out.append(m)
+    return out
+
+
+def _centres_seen(rotation):
+    idx = view_facelets(2, rotation)
+    return [FACES[idx[9 * i + 4] // 9] for i in range(3)]
+
+
+def assemble(view_readings, view2_rotation=None):
     """view_readings: {1: {'U': [9 rgb], 'F': [...], 'R': [...]}, 2: {...}}
     -> {face: [9 rgb]} for all six cube faces."""
     flat = [None] * 54
     for view, reading in view_readings.items():
         rgbs = [rgb for vface in VIEW_FACES for rgb in reading[vface]]
-        for idx, rgb in zip(view_facelets(view), rgbs):
+        for idx, rgb in zip(view_facelets(view, view2_rotation if view == 2 else None), rgbs):
             flat[idx] = rgb
     if any(v is None for v in flat):
         raise ValueError('a sticker was not read')
@@ -316,6 +336,31 @@ def scan_result(rgbs_by_face, locked=None, centers=None):
             'valid': result.ok, 'state': state if result.ok else None, 'centers': centers}
 
 
+def scan_any_hold(view_readings):
+    """Assembles and reads the cube, whichever of the 3 ways the user held it
+    for view 2 (they all show the three new sides; the instruction no longer
+    insists on one). The right one is the one whose colours fit a real cube
+    best: on real scans it fitted ~7-10 against 26-37 for the others.
+    Returns (rgbs_by_face, scan_result)."""
+    best = None
+    for rotation in _VIEW2_HOLDS:
+        rgbs = assemble(view_readings, rotation)
+        result = scan_result(rgbs)
+        key = (not result['valid'], len(result['doubtful']), _misfit(rgbs, result['colors']))
+        if best is None or key < best[0]:
+            best = (key, rgbs, result)
+    return best[1], best[2]
+
+
+def _misfit(rgbs_by_face, colors):
+    """Mean distance of the side stickers from their colour's average (lower = cleaner)."""
+    feats = _features(rgbs_by_face)
+    names = [c for f in FACES for c in colors[f]]
+    side = [i for i in range(54) if i % 9 != 4]
+    refs = {n: feats[[i for i in side if names[i] == n]].mean(axis=0) for n in set(names)}
+    return float(np.mean([np.linalg.norm(feats[i] - refs[names[i]]) for i in side]))
+
+
 def read_cube(rgbs_by_face):
     """Names all 54 colours and validates the cube: piece matching first, then
     the sticker-level centre rebalance, then rubiks-color-resolver. Returns
@@ -335,3 +380,6 @@ def read_cube(rgbs_by_face):
             return colors, result, state
         last = (colors, result, None)
     return last if last else (None, None, None)
+
+
+_VIEW2_HOLDS = _view2_holds()

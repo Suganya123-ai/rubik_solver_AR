@@ -13,6 +13,7 @@ import { describe, holdHint } from './moveText';
 import type { FrameReply, Message, ServerLink } from './serverLink';
 
 type ScanStatus = { phase: string; instruction: string | null; steady: number; needed: number;
+  scanned_centres?: [number, number, number][]; repeated?: string;
   message: string | null; captured: number[]; event: string | null };
 type ScanResult = { colors: Record<string, string[]>; doubtful: string[]; valid: boolean; centers: Record<string, string> };
 export type Track = { phase: string; step: number; total: number; move: string | null; undo: string[];
@@ -138,21 +139,29 @@ export class Flow {
     if (this.state.phase !== 'scan' || s.phase === 'off' || s.phase === 'done') return;
     const n = s.phase === 'view2' ? 2 : 1;
     this.steady(s.steady / s.needed);
+    // Side 1's centre colours: for side 2 these sides must NOT face the camera.
+    const done = (s.scanned_centres ?? []).map(([r, g, b]) => `<i style="background:rgb(${r},${g},${b})"></i>`).join('');
+    const doneText = done ? 'Already scanned (keep these away from the camera): ' : '';
+    const cancel: [string, () => void, string][] = [['Cancel  (Esc)', () => this.cancel(), '']];
     if (s.event === 'captured') {
       this.beep(1);
       this.effects.check(performance.now());
-      this.card(`✓ Side 1 of 2 captured`, '✓', 'Now flip the cube', s.instruction ?? '', [['Cancel  (Esc)', () => this.cancel(), '']], 'good');
+      this.card('✓ Side 1 of 2 captured', done, 'Now show the other three sides', s.instruction ?? '', cancel, 'good');
       this.holdUntil = performance.now() + 3000;
       return;
     }
     if (performance.now() < this.holdUntil) return;
     if (s.message) {
-      this.card(`Scan ${n} of 2`, '!', s.message, s.instruction ?? '', [['Cancel  (Esc)', () => this.cancel(), '']], 'warn');
+      this.card(`Scan ${n} of 2`, done || '!', 'A scanned side is showing again', s.message, cancel, 'warn');
       this.holdUntil = performance.now() + 2500;
       return;
     }
-    this.card(`Scan ${n} of 2`, '', s.steady ? 'Hold still…' : (n === 1 ? 'Show the cube corner-on' : 'Show the other three sides'),
-      s.instruction ?? '', [['Cancel  (Esc)', () => this.cancel(), '']]);
+    if (n === 2) {
+      this.card('Scan 2 of 2', done, s.steady ? 'Hold still…' : 'Show the other three sides',
+        doneText + (s.instruction ?? ''), cancel);
+      return;
+    }
+    this.card('Scan 1 of 2', '', s.steady ? 'Hold still…' : 'Show the cube corner-on', s.instruction ?? '', cancel);
   }
 
   private showReview(r: ScanResult, fresh: boolean): void {

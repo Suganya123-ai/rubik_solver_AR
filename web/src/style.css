@@ -121,3 +121,6 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); overf
 
 .ghost-label { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font: 10px var(--mono);
   color: rgba(232, 251, 255, .7); letter-spacing: .08em; pointer-events: none; }
+
+/* several colour swatches in the card chip (side 1's centres during scan 2) */
+.chip i + i { margin-left: 4px; }

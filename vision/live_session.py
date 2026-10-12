@@ -97,8 +97,10 @@ class LiveClient:
             result['scan'] = self.scan.feed(result)
             if result['scan']['event'] in ('captured', 'done'):
                 self._record_scan_view(jpeg, result)
+            elif result['scan'].get('message') and result['scan'].get('repeated'):
+                self._record_rejected_view(jpeg, result)
             if result['scan']['event'] == 'done':
-                self.scan_rgbs = assemble(self.scan.readings)
+                self.scan_rgbs = self.scan.rgbs  # (assembled for the way the cube was actually held)
                 result['scan_result'] = _scan_json(self.scan.result)
                 log.info('%s: scan complete (valid=%s, doubtful=%d)', self.name, self.scan.result['valid'],
                          len(self.scan.result['doubtful']))
@@ -134,6 +136,19 @@ class LiveClient:
         with open(os.path.join(self._scan_dir, 'scan.jsonl'), 'a') as fh:
             fh.write(json.dumps(record, default=float) + '\n')
         log.info('%s: scan view %d recorded to %s', self.name, view, self._scan_dir)
+
+    def _record_rejected_view(self, jpeg, result):
+        """Keeps the latest view-2 frame refused as "already scanned" (one
+        file, overwritten), so a refusal that shouldn't have happened can be checked."""
+        if os.environ.get('RUBIK_RECORD', '1') == '0' or self._scan_dir is None:
+            return
+        with open(os.path.join(self._scan_dir, 'view2_refused.jpg'), 'wb') as fh:
+            fh.write(jpeg)
+        with open(os.path.join(self._scan_dir, 'view2_refused.json'), 'w') as fh:
+            json.dump({'repeated': result['scan']['repeated'], 'keypoints': result.get('keypoints'),
+                       'reading': self.scan.rejected}, fh, default=float)
+        log.info('%s: view 2 refused: the side in position %s was already scanned', self.name,
+                 result['scan']['repeated'])
 
     def _note(self, result):
         """Counts what the camera saw and logs a summary every few seconds while

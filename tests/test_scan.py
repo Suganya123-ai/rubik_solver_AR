@@ -127,7 +127,7 @@ def test_scan_session_rejects_the_same_view_twice():
         st = _feed(s, _frame(views[1]))  # straight after the capture: no warning yet, they're about to flip
     assert st['event'] is None and st['message'] is None and s.view == 2
     messages = [_feed(s, _frame(views[1]))['message'] for _ in range(6 * STEADY_FRAMES)]  # still not flipped
-    assert any(m and 'first view again' in m for m in messages) and s.view == 2
+    assert any(m and 'already scanned' in m for m in messages) and s.view == 2
 
 
 # ---------- live protocol (scan check / accept / tracking) ----------
@@ -228,3 +228,27 @@ def test_a_slow_link_still_captures_after_a_short_hold():
         t += 0.25
         events.append(s.feed(_frame(views[1], shift=4.0 * i), now=t)['event'])  # small drift between frames
     assert 'captured' in events
+
+
+def test_view2_accepted_whichever_way_the_new_corner_is_held():
+    # All three ways of holding the opposite corner show the three new sides: each reads the right cube.
+    from cube.scan import _VIEW2_HOLDS, scan_any_hold, view_facelets
+    state = _scrambled(18)
+    rgb = [RGB[x] for x in state.arr]
+    first = {vf: [rgb[i] for i in view_facelets(1)[9 * n:9 * n + 9]] for n, vf in enumerate('UFR')}
+    for hold in _VIEW2_HOLDS:
+        idx = view_facelets(2, hold)
+        second = {vf: [rgb[i] for i in idx[9 * n:9 * n + 9]] for n, vf in enumerate('UFR')}
+        _, res = scan_any_hold({1: first, 2: second})
+        assert res['valid'] and ''.join(res['state'].arr) == ''.join(state.arr)
+
+
+def test_refusal_names_where_the_repeated_side_is():
+    views = _views(_scrambled(19))
+    s = ScanSession()
+    for _ in range(STEADY_FRAMES):
+        _feed(s, _frame(views[1]))
+    again = {'U': views[2]['U'], 'F': views[2]['F'], 'R': views[1]['R']}  # turned the wrong way: old Right shows
+    seen = [_feed(s, _frame(again)) for _ in range(10 * STEADY_FRAMES)]  # (past the 3 s grace after side 1)
+    assert any(st.get('repeated') == 'R' and st['message'] and 'on the right' in st['message'] for st in seen)
+    assert s.view == 2
