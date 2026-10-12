@@ -1,15 +1,56 @@
-# Rubik's Cube Solver (live camera, laptop first, XREAL glasses next)
+# Rubik's Cube Tutor — webcam AR app (branch `ar-webcam`)
 
-Hold a scrambled 3x3 cube up to the camera. The app finds the cube, reads the
-stickers from two views, works out a ~20-move solution, then watches you turn
-the cube: it ticks off each correct move, and if you make a different move it
-says what you did and re-plans from the real cube. It only asks you to rescan
-if it loses track of the cube.
+Hold a scrambled 3x3 cube up to your laptop webcam. The app finds the cube,
+reads all its colours from two views, works out a ~20-move solution, then
+guides you move by move: an arrow on your real cube, a ghost cube playing the
+move, and your hands traced. It checks every move; if you make a wrong one it
+tells you and shows the turn that undoes it, then carries on.
 
-- **Laptop (now):** webcam + Python server + browser page at `/live`.
-- **XREAL One Pro + Eye camera (next):** the glasses stream camera frames to
-  the same server over Wi-Fi and show the guidance. See
-  [xreal_ar/README.md](xreal_ar/README.md).
+> **This branch is separate work.** `main` and the original demo (branch
+> `live-solver`, tag `demo-v1`) are not changed by anything here.
+
+## Start here: clone and run the webcam app
+
+You need **Python 3.11+**, **Node.js 20.19+ (or 22.12+)** and Chrome.
+
+```
+git clone -b ar-webcam https://github.com/Suganya123-ai/rubik_solver_AR.git
+cd rubik_solver_AR
+./run_webcam.sh
+```
+
+Then open **<http://localhost:5173>** and allow the camera.
+
+- `-b ar-webcam` matters: a plain `git clone` gives you `main`, which is the
+  old version. (Already cloned? `git checkout ar-webcam`.)
+- The first run sets everything up by itself: a Python environment with
+  PyTorch (a large download, several minutes) and the web app's packages.
+  Later runs start in a few seconds.
+- Open it on the same computer at `localhost:5173`. Through a forwarded port
+  or tunnel the camera frames arrive slowly and scanning takes longer.
+
+**Using it**, step by step (scan, check colours, follow the moves, undo a
+mistake): see **[README_WEBCAM.md](README_WEBCAM.md)**.
+
+### What's in this repository
+
+| | Webcam AR app (this branch's main work) | Original demo |
+|---|---|---|
+| Start | `./run_webcam.sh` | `./run.sh` |
+| Open | <http://localhost:5173> | <http://localhost:8000/live> |
+| Code | `web/` (the screen) + the Python server | `static/` + the Python server |
+| Guide | [README_WEBCAM.md](README_WEBCAM.md) | the rest of this page |
+
+Both use the same Python "vision server" (`main.py`, `vision/`, `cube/`):
+it finds the cube (YOLO), tracks hands (MediaPipe), reads colours, solves
+(Kociemba) and checks each move. The XREAL glasses app is in
+[xreal_ar/](xreal_ar/README.md).
+
+---
+
+# The original demo and the vision server
+
+Everything below describes the original demo page and the shared server.
 
 ## Run it
 
@@ -99,7 +140,7 @@ camera frame ─► YOLO pose (7 cube corners) ─► per-face homography ─►
 .venv/bin/python -m pytest -q
 ```
 
-73 tests: move engine, validation, solver, color handling, the two-view
+95 tests: move engine, validation, solver, color handling, hands, the two-view
 mapping, piece matching, the scan and tracking state machines (simulated
 clock), the WebSocket protocol, the HTTP API. CI runs them on every push
 ([.github/workflows/tests.yml](.github/workflows/tests.yml)).
