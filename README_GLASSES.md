@@ -114,6 +114,27 @@ buttons on the card.
 - Not yet checked: a full scan-and-solve on the Beam Pro, and how it looks in
   the glasses.
 
+## What the glasses offer over USB (checked 13 Oct 2026, XREAL One Pro on a Mac)
+
+Plugged straight into a computer, the glasses are **not** a webcam. Their USB
+interfaces are: a control channel (HID), two network links (USB Ethernet,
+NCM and ECM) and audio. There is no video (UVC) interface, so no operating
+system or browser lists a camera for them.
+
+Over the network links the glasses answer at `169.254.2.1` (and `169.254.1.1`):
+
+| Port | What it is |
+|---|---|
+| 52998 | Motion sensors, streaming by default: ~1,400 packets/s of 134 bytes |
+| 52996 | A small status stream (~4.5 KB/s) |
+| 50051 | A gRPC control service (HTTP/2); it does not list its commands (no reflection) |
+| 1234, 50052, 50180, 52988-52995, 52997, 52999 | Open but silent until asked |
+
+The camera picture is not streamed by default. It has to be requested through
+XREAL's own protocol, which is not published, so the supported way to read the
+add-on camera is **XREAL's SDK** (the native app in [xreal_ar/](xreal_ar/README.md)).
+Nothing was sent to the glasses to find this out; the ports were only listened to.
+
 ## For development
 
 `cd web && npx vite` runs the web app with live reload on port 5273 (it
