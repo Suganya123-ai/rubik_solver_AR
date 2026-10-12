@@ -9,7 +9,7 @@ from cube.cube_state import solved_state  # noqa: E402
 from cube.moves import ALL_MOVES, apply_moves  # noqa: E402
 from vision.hands import BusyHands, covered_stickers  # noqa: E402
 from vision.reader import sticker_quads  # noqa: E402
-from vision.scan_session import STEADY_FRAMES as SCAN_FRAMES, ScanSession  # noqa: E402
+from vision.scan_session import STEADY_FRAMES as SCAN_FRAMES, STEADY_SECONDS as SCAN_SECONDS, ScanSession  # noqa: E402
 from vision.tracker import decide  # noqa: E402
 
 from tests.test_tracker import KPTS, REFS, VISIBLE, _frame, _scrambled, _session  # noqa: E402
@@ -64,7 +64,7 @@ def test_scan_uses_only_uncovered_frames_for_a_sticker():
     covered = {f: [False] * 9 for f in 'UFR'}
     covered['F'][2] = True
     t = 0.0
-    for n in range(SCAN_FRAMES + 3):
+    for n in range(max(SCAN_FRAMES, round(SCAN_SECONDS / 0.1) + 1) + 3):
         t += 0.1
         faces = {f: list(v) for f, v in views[1].items()}
         hidden = n % 2 == 0

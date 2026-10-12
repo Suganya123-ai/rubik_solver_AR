@@ -11,7 +11,10 @@ from cube.cube_state import CubeState, solved_state  # noqa: E402
 from cube.moves import ALL_MOVES, apply_moves  # noqa: E402
 from cube.scan import view_facelets  # noqa: E402
 from cube.solver import solve  # noqa: E402
-from vision.tracker import STEADY_FRAMES, TrackSession, decide, push_mistake, undo_moves  # noqa: E402
+from vision.tracker import STEADY_FRAMES, STEADY_SECONDS, TrackSession, decide, push_mistake, undo_moves  # noqa: E402
+
+# Frames of the simulated 10 fps camera that make a steady hold (enough frames and enough time).
+STEADY_FRAMES = max(STEADY_FRAMES, round(STEADY_SECONDS / 0.1) + 1)
 
 RGB = {'U': (240, 240, 235), 'D': (252, 216, 35), 'R': (215, 40, 55), 'L': (255, 125, 30),
        'F': (20, 175, 90), 'B': (15, 85, 205)}

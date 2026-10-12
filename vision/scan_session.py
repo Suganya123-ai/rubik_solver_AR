@@ -13,9 +13,11 @@ import numpy as np
 from cube.color_detect import color_feature
 from cube.scan import VIEW_INSTRUCTIONS, assemble, scan_result
 
-STEADY_FRAMES = 5
+STEADY_FRAMES = 3      # and STEADY_SECONDS: time decides (at a normal 15 frames/s that's 6+ frames);
+                       # a slow link (e.g. a forwarded port, ~4 frames/s) only needs 3
 STEADY_SECONDS = 0.4
-MAX_MOVE = 0.03          # fraction of the cube's size
+MAX_MOVE = 0.03          # fraction of the cube's size per 1/15 s (more allowed between frames further apart)
+FRAME_GAP = 1 / 15          # fraction of the cube's size
 FLIP_GRACE_S = 3.0        # after view 1 is captured, give the user this long to flip before warning
 SAME_SIDE_DISTANCE = 27   # mean colour-feature distance below which two sides are the same side (renders: same <= 25, different >= 29)
 
@@ -26,14 +28,19 @@ class ScanSession:
         self.readings = {}
         self._buffer = []
         self._last_kpts = None
+        self._last_time = None
+        self._now = 0.0
         self._steady_since = None
         self._captured_at = None
         self.result = None
 
+    def _steady_progress(self):
+        return _progress(self._buffer, self._steady_since, self._now)
+
     def status(self, message=None):
         return {'phase': 'done' if self.result else f'view{self.view}',
                 'instruction': None if self.result else VIEW_INSTRUCTIONS[self.view],
-                'steady': len(self._buffer), 'needed': STEADY_FRAMES, 'message': message,
+                'steady': self._steady_progress(), 'needed': 10, 'message': message,
                 'captured': sorted(self.readings)}
 
     def feed(self, frame_result, now=None):
@@ -41,6 +48,7 @@ class ScanSession:
         dict; status['event'] is 'captured' when a view was just captured and
         'done' when both views are in (then self.result is set)."""
         now = time.monotonic() if now is None else now
+        self._now = now
         if self.result is not None:
             return {**self.status(), 'event': None}
         kpts, faces = frame_result.get('keypoints'), frame_result.get('faces')
@@ -51,7 +59,9 @@ class ScanSession:
             return {**self.status(), 'event': None}
         k = np.asarray(kpts, float)
         size = np.mean(np.linalg.norm(k[1:] - k[0], axis=1))
-        if self._last_kpts is not None and np.max(np.linalg.norm(k - self._last_kpts, axis=1)) > MAX_MOVE * size:
+        gap = min(3.0, max(1.0, (now - self._last_time) / FRAME_GAP)) if self._last_time is not None else 1.0
+        self._last_time = now
+        if self._last_kpts is not None and np.max(np.linalg.norm(k - self._last_kpts, axis=1)) > MAX_MOVE * size * gap:
             self._buffer = []
         if not self._buffer:
             self._steady_since = now
@@ -107,3 +117,10 @@ _RING = (0, 1, 2, 5, 8, 7, 6, 3)  # a side's outer stickers, clockwise
 
 def _outer_ring(colours):
     return np.array([color_feature(colours[i]) for i in _RING])
+
+
+def _progress(buffer, since, now):
+    """How far a steady hold has got, 0..10: both enough frames and enough time are needed."""
+    if not buffer or since is None:
+        return 0
+    return int(10 * min(1.0, len(buffer) / STEADY_FRAMES, (now - since) / STEADY_SECONDS))

@@ -76,7 +76,10 @@ def test_scan_result_flags_nothing_on_a_clean_scan_and_respects_locks():
 
 
 # ---------- ScanSession (automatic capture) ----------
-from vision.scan_session import STEADY_FRAMES, ScanSession  # noqa: E402
+from vision.scan_session import STEADY_FRAMES, STEADY_SECONDS, ScanSession  # noqa: E402
+
+# Frames of the simulated 10 fps camera that make a steady hold (enough frames and enough time).
+STEADY_FRAMES = max(STEADY_FRAMES, round(STEADY_SECONDS / 0.1) + 1)
 
 KPTS = [[320, 250], [200, 180], [320, 110], [440, 180], [440, 330], [320, 400], [200, 330]]
 
@@ -214,3 +217,14 @@ def test_shaded_side_does_not_turn_red_into_orange():
     dark = {i: tuple(0.45 * v for v in RGB[x]) for i, x in enumerate(state.arr) if i // 9 == FACES.index('F')}
     res = scan_result(assemble(_views(state, noise=dark)))
     assert res['valid'] and ''.join(res['state'].arr) == ''.join(state.arr)
+
+
+def test_a_slow_link_still_captures_after_a_short_hold():
+    # Through a forwarded port only ~4 frames/s arrive, and the hand drifts more between them.
+    views = _views(_scrambled(17))
+    s = ScanSession()
+    t, events = 100.0, []
+    for i in range(4):
+        t += 0.25
+        events.append(s.feed(_frame(views[1], shift=4.0 * i), now=t)['event'])  # small drift between frames
+    assert 'captured' in events

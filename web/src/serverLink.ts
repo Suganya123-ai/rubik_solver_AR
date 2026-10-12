@@ -23,6 +23,10 @@ export type Message = FrameReply | ({ type: string } & Record<string, unknown>);
 
 const SEND_WIDTH = 640;
 const JPEG_QUALITY = 0.8;
+// On a slow link (e.g. a forwarded port) smaller frames get through more often.
+const SLOW_MS = 180;
+const SLOW_WIDTH = 480;
+const SLOW_QUALITY = 0.65;
 const REPLY_TIMEOUT_MS = 2000;
 
 export class ServerLink {
@@ -67,8 +71,10 @@ export class ServerLink {
     if (!this.connected || !video.videoWidth) return;
     if (this.inFlight && performance.now() - this.sentAt < REPLY_TIMEOUT_MS) return;
     this.inFlight = true;
-    this.canvas.width = SEND_WIDTH;
-    this.canvas.height = Math.round((SEND_WIDTH * video.videoHeight) / video.videoWidth);
+    const slow = this.latencyMs > SLOW_MS;
+    const width = slow ? SLOW_WIDTH : SEND_WIDTH;
+    this.canvas.width = width;
+    this.canvas.height = Math.round((width * video.videoHeight) / video.videoWidth);
     this.canvas.getContext('2d')!.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
     this.canvas.toBlob(async (blob) => {
       if (!blob || !this.ws || this.ws.readyState !== WebSocket.OPEN) { this.inFlight = false; return; }
@@ -78,7 +84,7 @@ export class ServerLink {
       msg.set(jpeg, 4);
       this.sentAt = performance.now();
       this.ws.send(msg);
-    }, 'image/jpeg', JPEG_QUALITY);
+    }, 'image/jpeg', slow ? SLOW_QUALITY : JPEG_QUALITY);
   }
 
   send(command: Record<string, unknown>): void {

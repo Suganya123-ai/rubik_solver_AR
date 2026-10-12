@@ -25,9 +25,11 @@ PRIOR = {0: 0.0, 1: 4.0, 2: 12.0}                         # prefer simpler expla
 EXPECTED_BONUS = 4.0                                      # the move we asked for costs nothing extra
 LOST_PER_STICKER = 22.0
 MARGIN = 6.0
-STEADY_FRAMES = 5
+STEADY_FRAMES = 3      # and STEADY_SECONDS: time decides (at a normal 15 frames/s that's 6+ frames);
+                       # a slow link (e.g. a forwarded port, ~4 frames/s) only needs 3
 STEADY_SECONDS = 0.3      # and at least this long: a fast camera repeats frames
-MAX_MOVE = 0.03
+MAX_MOVE = 0.03          # fraction of the cube's size per 1/15 s (more allowed between frames further apart)
+FRAME_GAP = 1 / 15
 LOST_AFTER_S = 3.0
 MAX_UNDO = 3              # more mistakes than this to undo: make a new plan instead
 HOME_MESSAGE = 'Turn the cube back to the first position: Top, Front and Right toward the camera.'
@@ -185,6 +187,8 @@ class TrackSession:
         self.home_ok = False
         self._buffer, self._last_kpts = [], None
         self._steady_since = None
+        self._last_time = None
+        self._now = 0.0
         self._lost_since = None
         self._lost_reported = False
         self.history = []
@@ -241,6 +245,9 @@ class TrackSession:
         """The move to show: the next undo move while off track, else the plan's next move."""
         return undo_moves(self.off)[0] if self.off else self._plan_move()
 
+    def _steady_progress(self):
+        return _progress(self._buffer, self._steady_since, self._now)
+
     def status(self, event=None, message=None):
         expected = self._expected()
         if message is None and not self.home_ok and not self.solved:
@@ -253,7 +260,7 @@ class TrackSession:
             phase = 'undo' if self.off else 'tracking'
         return {'phase': phase, 'undo': undo_moves(self.off), 'plan_move': self._plan_move(),
                 'step': self.step + 1, 'total': len(self.plan), 'move': expected,
-                'steady': len(self._buffer), 'needed': STEADY_FRAMES, 'event': event, 'message': message,
+                'steady': self._steady_progress(), 'needed': 10, 'event': event, 'message': message,
                 'state': ''.join(self.letters), 'face_colors': self.face_colors}
 
     def skip(self):
@@ -280,6 +287,7 @@ class TrackSession:
 
     def feed(self, frame_result, now=None):
         now = time.monotonic() if now is None else now
+        self._now = now
         if self.solved:  # (the 'solved' event was already sent with the move that solved it)
             return self.status()
         kpts, faces = frame_result.get('keypoints'), frame_result.get('faces')
@@ -294,7 +302,9 @@ class TrackSession:
             return self._maybe_lost(now)
         k = np.asarray(kpts, float)
         size = np.mean(np.linalg.norm(k[1:] - k[0], axis=1))
-        if self._last_kpts is not None and np.max(np.linalg.norm(k - self._last_kpts, axis=1)) > MAX_MOVE * size:
+        gap = min(3.0, max(1.0, (now - self._last_time) / FRAME_GAP)) if self._last_time is not None else 1.0
+        self._last_time = now
+        if self._last_kpts is not None and np.max(np.linalg.norm(k - self._last_kpts, axis=1)) > MAX_MOVE * size * gap:
             self._count('cube moving')
             self._buffer = []
         if not self._buffer:
@@ -420,3 +430,10 @@ class TrackSession:
             return self.status('lost' if first else None, message or f"Lost track of the cube. {self.position_hint()} "
                                                   "If the moves got mixed up, scan again.")
         return self.status(None, message)
+
+
+def _progress(buffer, since, now):
+    """How far a steady hold has got, 0..10: both enough frames and enough time are needed."""
+    if not buffer or since is None:
+        return 0
+    return int(10 * min(1.0, len(buffer) / STEADY_FRAMES, (now - since) / STEADY_SECONDS))
