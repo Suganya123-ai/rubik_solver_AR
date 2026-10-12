@@ -196,3 +196,21 @@ def test_skip_works_while_undoing():
     assert _hold(s, cube.arr)['phase'] == 'undo'
     st = s.skip()
     assert st['event'] == 'undone' and ''.join(s.letters) == ''.join(state.arr)
+
+
+def test_cube_held_turned_round_is_followed():
+    # After the scan the user holds the cube turned 180 degrees (front <-> back, left <-> right):
+    # the tracker notices, renames sides and the plan, and carries on.
+    from vision.tracker import _TURNS
+    state = _scrambled(30)
+    s = _session(state)
+    m, perm, rename = next(t for t in _TURNS if (t[0] == np.diag([-1, 1, -1])).all())
+    held = state.arr[perm]                     # what the camera sees, held turned round
+    plan = list(s.plan)
+    st = _hold(s, np.array([x for x in held]))
+    assert st['event'] in ('home', 'reoriented') and s.home_ok
+    assert s.plan == [rename[mv[0]] + mv[1:] for mv in plan]
+    cube = CubeState(np.array(held))
+    for mv in s.plan[:3]:                      # the renamed moves, done on the held cube, are recognised
+        cube = apply_moves(cube, [mv])
+        assert _hold(s, cube.arr)['event'] == 'correct'

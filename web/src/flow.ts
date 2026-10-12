@@ -246,6 +246,10 @@ export class Flow {
     if (undoing) buttons.push(['New plan instead  (N)', () => this.link.send({ type: 'track_replan' }), '']);
     buttons.push(['Stop  (Esc)', () => this.cancel(), '']);
 
+    if (t.phase === 'home' && t.event === 'reoriented') {
+      this.card('Got it', '', 'Following the cube the way you are holding it', 'Hold it still for a moment.', buttons, 'good');
+      return;
+    }
     if (t.phase === 'home') {
       this.el.popup.hidden = true;
       this.card('Get ready', '', 'Hold the cube like in the first scan', holdHint(t.face_colors), buttons);
@@ -268,6 +272,11 @@ export class Flow {
       return;
     }
     this.el.popup.hidden = true;
+    if (t.event === 'reoriented') {
+      this.holdUntil = now + 2500;
+      this.card('Got it', chip, m.title, `Following the cube the way you're holding it. ${m.how}`, buttons, 'good');
+      return;
+    }
     if (t.event === 'correct' || t.event === 'undone' || t.event === 'replanned') {
       this.holdUntil = now + 1200;
       this.card(t.event === 'undone' ? '✓ Undone -- back on track' : t.event === 'replanned' ? 'New plan' : '✓ Correct',

@@ -30,9 +30,11 @@ export class Hud {
       row('CUBE', r.confidence ? `${Math.round(r.confidence * 100)}%` : '—');
   }
 
-  /** Show the hint and target box when the cube isn't being found reliably. */
-  showHint(on: boolean): void {
-    this.hint.classList.toggle('on', on);
+  /** Show the hint and target box when the cube isn't being found reliably;
+   *  or (target box off) another hint, e.g. "tilt the cube". */
+  showHint(on: boolean, text?: string): void {
+    this.hint.textContent = text ?? 'Hold the cube steady inside the box, corner-on, so three sides show';
+    this.hint.classList.toggle('on', on || !!text);
     this.target.classList.toggle('on', on);
   }
 

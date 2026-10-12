@@ -118,3 +118,16 @@ def test_a_hidden_finger_jumping_around_is_not_turning():
         pts[8] = [pts[8][0] + rng.normal(0, 60), pts[8][1] + rng.normal(0, 60)]   # index tip jumping
         pts[12] = [pts[12][0] + rng.normal(0, 60), pts[12][1] + rng.normal(0, 60)]  # middle tip too
         assert not busy.update([{'points': pts}], KPTS, 0.05 * i)
+
+
+def test_two_hands_holding_the_cube_are_not_turning():
+    # Both hands on the cube, close together: each must be compared with itself, not the other hand.
+    busy = BusyHands()
+    left = _finger_over('F', 4)
+    right = {'points': _shift(left['points'], 50)}
+    rng = np.random.default_rng(2)
+    for i in range(20):
+        hands = [{'points': [[x + rng.normal(0, 2), y + rng.normal(0, 2)] for x, y in h['points']]} for h in (left, right)]
+        if i % 2:
+            hands.reverse()  # MediaPipe doesn't keep the order
+        assert not busy.update(hands, KPTS, 0.05 * i)

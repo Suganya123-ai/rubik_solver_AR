@@ -8,13 +8,14 @@ few array lookups. Tested in bench/bench_tracking.py: with accurate corner
 points it is right ~99% of the time and almost never names a wrong move; when
 unsure it waits, and only after a few seconds of nothing fitting does it ask
 for a rescan."""
+import itertools
 import time
 
 import numpy as np
 
 from cube.color_detect import color_feature
 from cube.cube_state import CubeState, solved_state
-from cube.moves import ALL_MOVES, apply_moves
+from cube.moves import ALL_MOVES, FACELET_DIR, INDEX_TO_POS, POS_TO_INDEX, apply_moves
 from cube.scan import view_facelets
 
 LETTERS = 'URFDLB'
@@ -64,6 +65,38 @@ def push_mistake(stack, move):
 def undo_moves(stack):
     """The moves that take the cube back to where the mistakes started."""
     return [inverse(m) for m in reversed(stack)]
+
+
+def _whole_cube_turns():
+    """The 24 ways to hold the cube, each as (rotation matrix, sticker
+    permutation, face renaming). After holding it turned by `m`: the sticker
+    now at index j is the one that was at perm[j], and a side that was face X
+    is now face rename[X]."""
+    out = []
+    for axes in itertools.permutations(range(3)):
+        for signs in itertools.product((1, -1), repeat=3):
+            m = np.zeros((3, 3), int)
+            for row, (col, sign) in enumerate(zip(axes, signs)):
+                m[row, col] = sign
+            if round(np.linalg.det(m)) != 1:
+                continue  # mirror images aren't real ways to hold a cube
+            perm = np.zeros(54, int)
+            for i in range(54):
+                pos, d = INDEX_TO_POS[i]
+                perm[POS_TO_INDEX[(tuple(int(v) for v in m @ np.array(pos)), tuple(int(v) for v in m @ np.array(d)))]] = i
+            rename = {x: next(y for y, dy in FACELET_DIR.items() if tuple(m @ np.array(dx)) == tuple(dy))
+                      for x, dx in FACELET_DIR.items()}
+            out.append((m, perm, rename))
+    return out
+
+
+_TURNS = _whole_cube_turns()
+REORIENT_GAIN = 0.85  # another way of holding the cube must fit this much better (score ratio) to switch to it
+WELL_FITTING = 12.0   # a judgement fitting this well (per sticker) with at most one move is trusted as is
+
+
+def rename_move(move, rename):
+    return rename[move[0]] + move[1:]
 
 
 _CANDIDATES = _candidates()
@@ -160,6 +193,34 @@ class TrackSession:
     def solved(self):
         return ''.join(self.letters) == ''.join(solved_state().arr)
 
+    def _reorient(self, obs, visible, score_now):
+        """Tries every other way of holding the cube (with no move, or one
+        move made meanwhile). If one fits clearly better, switches to it:
+        the state, colours, plan and undo list are renamed to the new
+        orientation (the same physical moves), and tracking carries on."""
+        best = None
+        for m, perm, rename in _TURNS:
+            if np.array_equal(m, np.eye(3)):
+                continue
+            letters = np.array([rename[x] for x in self.letters[perm]])
+            refs = {rename[x]: v for x, v in self.refs.items()}
+            info = {}
+            verdict, moves, _ = decide(letters, obs, refs, None, visible, info)
+            if verdict == 'ok' and len(moves) <= 1 and (best is None or info['per_sticker'] < best[0]):
+                best = (info['per_sticker'], perm, rename)
+        if best is None or best[0] > REORIENT_GAIN * score_now:
+            return False
+        _, perm, rename = best
+        self.letters = np.array([rename[x] for x in self.letters[perm]])
+        self.refs = {rename[x]: v for x, v in self.refs.items()}
+        self.face_colors = {rename[x]: c for x, c in self.face_colors.items()}
+        self.plan = [rename_move(mv, rename) for mv in self.plan]
+        self.off = [rename_move(mv, rename) for mv in self.off]
+        if self._resume_letters is not None:
+            self._resume_letters = np.array([rename[x] for x in np.asarray(self._resume_letters)[perm]])
+        self._count('reoriented')
+        return True
+
     def _count(self, what):
         self.counts[what] = self.counts.get(what, 0) + 1
 
@@ -253,6 +314,14 @@ class TrackSession:
         expected = self._expected()
         info = {}
         verdict, moves, new_letters = decide(self.letters, obs, self.refs, expected, visible, info)
+        reoriented = False
+        if not (verdict == 'ok' and len(moves) <= 1 and info.get('per_sticker', 99) < WELL_FITTING):
+            # Nothing explains it well: maybe the cube is just held another way round.
+            if self._reorient(obs, visible, info.get('per_sticker', 99)):
+                reoriented = True
+                expected = self._expected()
+                info = {}
+                verdict, moves, new_letters = decide(self.letters, obs, self.refs, expected, visible, info)
         self._count(f'judged {verdict}')
         self.last_judgement = {'phase': 'tracking' if self.home_ok else 'home', 'expected': expected,
                                'verdict': verdict, **info}
@@ -266,6 +335,8 @@ class TrackSession:
                 self._lost_since = None
                 self._recalibrate(obs, None, visible)
                 return self.status('home', 'Cube in position. Do the first move.')
+            if reoriented:  # (it fits another way round, but not yet without a move: keep waiting)
+                return self.status('reoriented', 'Following the cube the way you are holding it now.')
             return self._maybe_lost(now, self.home_message())
         if verdict == 'lost':
             return self._maybe_lost(now)
@@ -275,7 +346,8 @@ class TrackSession:
             return self.status('unsure')
         self._recalibrate(obs, new_letters, visible)
         if moves == ():
-            return self.status()
+            return self.status('reoriented', 'Following the cube the way you are holding it now.') if reoriented \
+                else self.status()
         self.history.append(moves)
         self.letters = new_letters
         if self.solved:

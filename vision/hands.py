@@ -159,9 +159,13 @@ class BusyHands:
         self._history = [(t, v) for t, v in self._history if now - t <= TURN_WINDOW_S] + [(now, current)]
         for _, old in self._history[:-1]:
             for hand in current:
-                for prev in old:
-                    if np.linalg.norm(prev[0] - hand[0]) > 0.6:  # wrists far apart: a different hand
-                        continue
-                    if np.median(np.linalg.norm(hand - prev, axis=1)) > TURN_MOTION:
-                        self._busy_until = now + BUSY_HOLD_S
+                if not old:
+                    continue
+                # The same hand earlier: the one whose wrist was closest. (Comparing with *any*
+                # hand nearby compared the left hand with the right one when both hold the cube.)
+                prev = min(old, key=lambda q: np.linalg.norm(q[0] - hand[0]))
+                if np.linalg.norm(prev[0] - hand[0]) > 0.6:
+                    continue
+                if np.median(np.linalg.norm(hand - prev, axis=1)) > TURN_MOTION:
+                    self._busy_until = now + BUSY_HOLD_S
         return now < self._busy_until

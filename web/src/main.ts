@@ -80,6 +80,17 @@ function placeGhost(corners: [number, number][] | null): void {
 }
 link.onConnection = (up) => hud.say(up ? '' : 'Connecting to the vision server…');
 
+/** True when one side fills the view and another hardly shows (the cube is held face-on):
+ *  the stickers on the thin sides can't be read well, so moves are missed. */
+function faceOn(c: [number, number][]): boolean {
+  const area = (q: number[]) => Math.abs(q.reduce((s, i, k) => {
+    const j = q[(k + 1) % q.length];
+    return s + c[i][0] * c[j][1] - c[j][0] * c[i][1];
+  }, 0)) / 2;
+  const sides = [area([2, 3, 0, 1]), area([1, 0, 5, 6]), area([0, 3, 4, 5])];
+  return Math.min(...sides) < 0.5 * Math.max(...sides);  // real frames: good 0.6-0.8, missed moves 0.36-0.45
+}
+
 function resize(): void {
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.round(innerWidth * dpr);
@@ -111,8 +122,10 @@ function frame(now: number): void {
   while (frames.length && now - frames[0] > 1000) frames.shift();
   hud.readouts({ fps: frames.length, handsFps: hands.fps, replies: link.repliesPerSecond, latency: link.latencyMs,
                  serverMs: link.serverMs, confidence: cube.confident ? cube.confidence : 0, connected: link.connected });
-  hud.showHint((state.phase === 'camera' || state.phase === 'scan' || state.phase === 'guided' || state.phase === 'undo')
-               && link.connected && now - lastConfident > HINT_AFTER_MS);
+  const active = state.phase === 'camera' || state.phase === 'scan' || state.phase === 'guided' || state.phase === 'undo';
+  const lostCube = active && link.connected && now - lastConfident > HINT_AFTER_MS;
+  hud.showHint(lostCube, !lostCube && active && corners && faceOn(corners)
+    ? 'Tilt the cube so you see three sides -- a corner pointing at the camera' : undefined);
 }
 
 async function boot(): Promise<void> {
