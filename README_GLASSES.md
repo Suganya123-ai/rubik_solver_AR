@@ -101,12 +101,18 @@ buttons on the card.
 
 ## Status
 
-- Tested on the laptop with a simulated camera, opened through the laptop's
-  Wi-Fi address over https (the way the Beam Pro reaches it): scan, a wrong
-  move, its undo, solved; both views.
-- **Not yet tried on a Beam Pro or in the glasses.** Unknown until then:
-  whether Chrome lists the Eye camera, and how many frames per second the
-  Beam Pro manages over your Wi-Fi.
+- **Works on a Beam Pro (X4200, Android 14) over USB** (12 Oct 2026): the page
+  loads in Chrome, the back camera streams to the laptop at ~25 replies a
+  second with ~15 ms delay, the cube and the hand are found.
+- **Chrome lists only the Beam Pro's own cameras** ("camera 0, facing back",
+  "camera 1, facing front"). The glasses' add-on camera was not offered to
+  the browser in that test, so for now the Beam Pro's back camera is pointed
+  at the cube. Reading the glasses' camera needs the native app in
+  [xreal_ar/](xreal_ar/README.md) (XREAL's SDK).
+- Also tested on the laptop with a simulated camera through the Wi-Fi address
+  over https: scan, a wrong move, its undo, solved; both views.
+- Not yet checked: a full scan-and-solve on the Beam Pro, and how it looks in
+  the glasses.
 
 ## For development
 

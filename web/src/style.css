@@ -139,4 +139,14 @@ body.hud-only #ghost { background: none; border-color: transparent; }
 #controls select, #controls button { font: inherit; color: var(--ink); background: rgba(255, 255, 255, .08);
   border: 1px solid rgba(255, 255, 255, .25); border-radius: 8px; padding: 5px 8px; max-width: 46vw; }
 body.glasses .turning { top: 64px; }  /* below the camera chooser */
-@media (max-width: 900px) { #controls { right: 8px; top: 8px; } }
+@media (max-width: 900px) {
+  /* Phone-sized screen (the Beam Pro held upright): the chooser spans the top, the readouts make room for it. */
+  #controls { left: 8px; right: 8px; top: 8px; justify-content: space-between; }
+  #controls select { max-width: 52vw; }
+  body.glasses .hud-stats { display: none; }
+  body.glasses .progress { top: 70px; }
+  body.glasses .turning { top: 60px; }
+  body.glasses .popup { top: 64px; }
+  .card { bottom: 12px; padding: 10px 14px 12px; }
+  .card-main { font-size: 20px; }
+}

@@ -336,9 +336,10 @@ export class Flow {
     if (box.dataset.key === key) return;  // don't rebuild (keeps clicks working at 20 updates/s)
     box.dataset.key = key;
     box.innerHTML = '';
+    const touch = matchMedia('(pointer: coarse)').matches;  // no keyboard: drop the key hints like "(Esc)"
     for (const [label, action, cls] of list) {
       const b = document.createElement('button');
-      b.textContent = label;
+      b.textContent = touch ? label.replace(/\s*\([^)]*\)\s*$/, '') : label;
       b.className = cls;
       b.onclick = action;
       box.appendChild(b);
