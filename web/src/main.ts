@@ -30,6 +30,9 @@ const effects = new Effects();
 const flow = new Flow(link, state, effects, document.getElementById('ui')!);
 const ghostBox = document.getElementById('ghost')!;
 const ghost = new window.CubeHologram(document.getElementById('ghost-canvas') as HTMLCanvasElement);
+// Seen from the user's side: the webcam looks at the cube from the other side,
+// so the ghost is turned round (green facing the user is in front) and not mirrored.
+ghost.homeYaw = ghost.yaw = -0.68 + Math.PI;
 let ghostPos: [number, number, number] | null = null;
 
 const HINT_AFTER_MS = 800; // no confident cube for this long: show the "hold it steady" hint

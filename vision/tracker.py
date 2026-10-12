@@ -153,6 +153,7 @@ class TrackSession:
         self._buffer, self._last_kpts = [], None
         self._steady_since = None
         self._lost_since = None
+        self._lost_reported = False
         self.history = []
 
     @property
@@ -218,8 +219,8 @@ class TrackSession:
 
     def feed(self, frame_result, now=None):
         now = time.monotonic() if now is None else now
-        if self.solved:
-            return self.status('solved' if self.step else None)
+        if self.solved:  # (the 'solved' event was already sent with the move that solved it)
+            return self.status()
         kpts, faces = frame_result.get('keypoints'), frame_result.get('faces')
         self._count('frames')
         if frame_result.get('hands_busy'):  # mid-turn: judge the result once the hands stop
@@ -269,6 +270,7 @@ class TrackSession:
         if verdict == 'lost':
             return self._maybe_lost(now)
         self._lost_since = None
+        self._lost_reported = False
         if verdict == 'unsure':
             return self.status('unsure')
         self._recalibrate(obs, new_letters, visible)
@@ -341,6 +343,8 @@ class TrackSession:
         if self._lost_since is None:
             self._lost_since = now
         if now - self._lost_since >= LOST_AFTER_S:
-            return self.status('lost', message or f"Lost track of the cube. {self.position_hint()} "
+            first = not self._lost_reported
+            self._lost_reported = True  # the 'lost' event once; the message stays until the cube is back
+            return self.status('lost' if first else None, message or f"Lost track of the cube. {self.position_hint()} "
                                                   "If the moves got mixed up, scan again.")
         return self.status(None, message)

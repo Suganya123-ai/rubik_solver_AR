@@ -9,6 +9,7 @@
 
 import type { AppState } from './appState';
 import type { Effects } from './overlay/effects';
+import { describe, holdHint } from './moveText';
 import type { FrameReply, Message, ServerLink } from './serverLink';
 
 type ScanStatus = { phase: string; instruction: string | null; steady: number; needed: number;
@@ -24,11 +25,11 @@ const PALETTE = ['white', 'yellow', 'red', 'orange', 'green', 'blue'];
 const SWATCH: Record<string, string> = { white: '#f4f4f0', yellow: '#ffd43b', red: '#e03131', orange: '#ff8a1f',
   green: '#2fb35a', blue: '#2a6fdb' };
 
-/** "Turn the green side clockwise" for a move like R' and the cube's face colours. */
-export function describeMove(move: string, faceColours: Record<string, string>): { side: string; turn: string } {
-  const colour = faceColours[move[0]] ?? move[0];
-  const turn = move.endsWith('2') ? 'a half turn (twice)' : move.endsWith("'") ? 'counter-clockwise' : 'clockwise';
-  return { side: colour, turn };
+/** A move from the user's seat: a title ("Turn the green side (facing you)") and how ("its top edge moves to your left"). */
+function moveWords(move: string, colours: Record<string, string>): { colour: string; title: string; how: string } {
+  const d = describe(move, colours);
+  const how = d.half ? 'Twice -- a half turn, either way.' : `${d.part[0].toUpperCase()}${d.part.slice(1)} moves ${d.moves}.`;
+  return { colour: d.colour, title: `Turn the ${d.colour} side (${d.position})`, how };
 }
 
 export class Flow {
@@ -247,20 +248,20 @@ export class Flow {
 
     if (t.phase === 'home') {
       this.el.popup.hidden = true;
-      this.card('Get ready', '', 'Hold the cube like in the first scan', t.message ?? '', buttons);
+      this.card('Get ready', '', 'Hold the cube like in the first scan', holdHint(t.face_colors), buttons);
       return;
     }
-    const m = describeMove(t.move ?? '', t.face_colors);
-    const chip = `<i style="background:${SWATCH[m.side] ?? '#888'}"></i>`;
+    const m = moveWords(t.move ?? '', t.face_colors);
+    const chip = `<i style="background:${SWATCH[m.colour] ?? '#888'}"></i>`;
     if (undoing) {
       const left = t.undo.length;
       this.el.popup.hidden = false;
-      this.el['popup-move'].innerHTML = `${chip} Turn the ${m.side} side ${m.turn}`;
-      this.el['popup-text'].textContent = left > 1 ? `${left} turns to undo, then the plan carries on.`
-        : `That undoes it. Then carry on with the plan.`;
+      this.el['popup-move'].innerHTML = `${chip} ${m.title}`;
+      this.el['popup-text'].textContent = m.how + (left > 1 ? ` (${left} turns to undo, then the plan carries on.)`
+        : ' That undoes it; then the plan carries on.');
       if (t.event === 'wrong' || now > this.holdUntil) {
-        this.card(t.event === 'wrong' ? 'Not that one' : 'Undo the mistake', chip, `Turn the ${m.side} side ${m.turn}`,
-          t.event === 'wrong' ? this.friendly(t.message, t.face_colors) : 'Looking straight at that side. Then hold still.',
+        this.card(t.event === 'wrong' ? 'Not that one -- undo it' : 'Undo the mistake', chip, m.title,
+          t.event === 'wrong' ? `${this.friendly(t.message, t.face_colors)} To undo: ${m.how}` : `${m.how} Then hold still.`,
           buttons, 'bad');
         if (t.event === 'wrong') this.holdUntil = now + 4000;
       }
@@ -270,25 +271,24 @@ export class Flow {
     if (t.event === 'correct' || t.event === 'undone' || t.event === 'replanned') {
       this.holdUntil = now + 1200;
       this.card(t.event === 'undone' ? '✓ Undone -- back on track' : t.event === 'replanned' ? 'New plan' : '✓ Correct',
-        chip, `Turn the ${m.side} side ${m.turn}`, `Move ${t.step} of ${t.total}. Looking straight at the ${m.side} centre.`, buttons, 'good');
+        chip, m.title, `${m.how} (move ${t.step} of ${t.total})`, buttons, 'good');
       return;
     }
     if (t.event === 'lost') {
-      this.card('Lost the cube', '!', 'Bring the cube back into view', t.message ?? '', buttons, 'warn');
+      this.card('Lost the cube', '!', 'Bring the cube back into view', holdHint(t.face_colors), buttons, 'warn');
       this.holdUntil = now + 3000;
       return;
     }
     if (now < this.holdUntil) return;
-    this.card(`Move ${t.step} of ${t.total}`, chip, `Turn the ${m.side} side ${m.turn}`,
-      `Looking straight at the ${m.side} centre. Then hold the cube still.`, buttons);
+    this.card(`Move ${t.step} of ${t.total}`, chip, m.title, `${m.how} Then hold the cube still.`, buttons);
   }
 
   /** The server's "You did U instead of L" in colours. */
   private friendly(message: string | null, colours: Record<string, string>): string {
     const did = /You did (.+?) instead of (\S+?)\./.exec(message ?? '');
     if (!did) return message ?? '';
-    const name = (mv: string) => { const d = describeMove(mv, colours); return `${d.side} ${d.turn}`; };
-    return `You turned ${did[1].split(' then ').map(name).join(', then ')} -- the plan was ${name(did[2])}. Undo it as shown.`;
+    const name = (mv: string) => describe(mv, colours).colour;
+    return `You turned the ${did[1].split(' then ').map(name).join(' side, then the ')} side -- the move was the ${name(did[2])} side.`;
   }
 
   private showStats(): void {

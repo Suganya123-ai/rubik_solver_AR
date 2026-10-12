@@ -126,8 +126,10 @@
       this.state = null;
       this.faceColours = {};
       this.move = null;
-      this.yaw = -0.68;   // from the camera's corner: Front left, Right right
-      this.pitch = 0.5;
+      this.homeYaw = -0.68;   // from the camera's corner: Front left, Right right
+      this.homePitch = 0.5;   // (the webcam app turns this round to the user's side)
+      this.yaw = this.homeYaw;
+      this.pitch = this.homePitch;
       this.start = performance.now();
       this._drag(canvas);
       this._frame = this._frame.bind(this);
@@ -155,7 +157,7 @@
         last = [e.clientX, e.clientY];
       });
       canvas.addEventListener('pointerup', () => { last = null; });
-      canvas.addEventListener('dblclick', () => { this.yaw = -0.68; this.pitch = 0.5; });
+      canvas.addEventListener('dblclick', () => { this.yaw = this.homeYaw; this.pitch = this.homePitch; });
     }
 
     // world -> view space (camera looks down -z from +z)
