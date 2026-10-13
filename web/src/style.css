@@ -150,3 +150,9 @@ body.glasses .turning { top: 64px; }  /* below the camera chooser */
   .card { bottom: 12px; padding: 10px 14px 12px; }
   .card-main { font-size: 20px; }
 }
+
+/* Remote camera: the picture the server receives from the bridge app, in place of the video. */
+#remote-picture { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#remote-picture[hidden] { display: none; }
+body.hud-only #remote-picture { visibility: hidden; }
+body.remote #video { display: none; }

@@ -1,0 +1,15 @@
+# Gradle
+.gradle/
+build/
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# XREAL's own libraries (their property; not redistributed here). Fetch them with ./get_xreal_libs.sh
+app/src/main/jniLibs/

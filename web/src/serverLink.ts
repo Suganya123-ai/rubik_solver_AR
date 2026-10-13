@@ -46,10 +46,13 @@ export class ServerLink {
   private replies: number[] = [];
   private canvas = document.createElement('canvas');
   private queue: string[] = [];  // commands sent before the connection opened
+  /** '/ws/live': this page sends the frames. '/ws/view': frames come from elsewhere
+   *  (the bridge app); this page only receives the results and sends commands. */
+  path = '/ws/live';
 
   connect(): void {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/ws/live`);
+    const ws = new WebSocket(`${proto}://${location.host}${this.path}`);
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       this.connected = true;
@@ -98,7 +101,7 @@ export class ServerLink {
     if (msg.type === 'frame') {
       const now = performance.now();
       this.inFlight = false;
-      this.latencyMs = now - this.sentAt;
+      if (this.path === '/ws/live') this.latencyMs = now - this.sentAt;
       this.serverMs = (msg as FrameReply).ms;
       this.replies.push(now);
       while (this.replies.length && now - this.replies[0] > 1000) this.replies.shift();

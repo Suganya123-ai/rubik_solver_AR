@@ -6,6 +6,7 @@ the camera (Front-Right-Top), then 1 Front-Left-Top, 2 Back-Left-Top,
 6 Front-Left-Bottom -- the hexagon you see when the cube is held corner-on.
 """
 import os
+import threading
 
 import numpy as np
 
@@ -30,6 +31,10 @@ class CubeDetector:
         from ultralytics import YOLO  # heavy import, only when the live view is used
 
         self.device = device if device is not None else _best_device()
+        # One frame on the GPU at a time: the server answers several connections from a thread
+        # pool, and two predictions at once abort the process on Apple GPUs ("A command encoder
+        # is already encoding to this command buffer").
+        self._lock = threading.Lock()
         self.model = YOLO(model_path)
         # Warm up on the frame shapes webcams send (4:3 and 16:9): on Apple GPUs the
         # first frame of each new shape takes seconds while it's compiled.
@@ -39,7 +44,8 @@ class CubeDetector:
     def detect(self, frame, min_confidence=0.25):
         """frame: BGR image. Returns (7x2 float32 keypoints in frame pixels,
         confidence) for the most confident cube, or None."""
-        result = self.model.predict(frame, imgsz=640, device=self.device, verbose=False)[0]
+        with self._lock:
+            result = self.model.predict(frame, imgsz=640, device=self.device, verbose=False)[0]
         if result.keypoints is None or len(result.boxes) == 0:
             return None
         best = int(result.boxes.conf.argmax())
@@ -50,11 +56,17 @@ class CubeDetector:
 
 
 _detector = None
+_loading = threading.Lock()
 
 
 def get_detector():
-    """One shared detector, loaded on first use (loading takes a few seconds)."""
+    """One shared detector, loaded on first use (loading takes a few seconds).
+    Loaded once even if several frames arrive while it is still loading (a
+    client that reconnects the moment the server restarts): a second copy
+    warming up on the GPU at the same time crashed the server."""
     global _detector
     if _detector is None:
-        _detector = CubeDetector()
+        with _loading:
+            if _detector is None:
+                _detector = CubeDetector()
     return _detector

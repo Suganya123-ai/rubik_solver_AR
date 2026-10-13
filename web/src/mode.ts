@@ -17,3 +17,8 @@ export function setHudOnly(on: boolean): void { hudOnly = on; }
 /** Hand tracking mode from the URL (gpu | cpu | off). The Beam Pro is a phone-class
  *  device, so the glasses default to the server's hand tracking only ("off" here). */
 export const handsMode = params.get('hands') ?? (glasses ? 'off' : 'gpu');
+
+/** The camera is not this browser's: an app (the bridge on the Beam Pro, which
+ *  reads the glasses' add-on camera) uploads the frames to the server, and this
+ *  page shows the results and the picture the server received. `?camera=remote` */
+export const remoteCamera = params.get('camera') === 'remote';

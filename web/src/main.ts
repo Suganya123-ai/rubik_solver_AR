@@ -14,7 +14,7 @@ import { Effects } from './overlay/effects';
 import { drawMoveArrows } from './overlay/moveArrows';
 import { drawHands } from './overlay/handMesh';
 import { Hud } from './overlay/hud';
-import { glasses, handsMode, hudOnly, setHudOnly } from './mode';
+import { glasses, handsMode, hudOnly, remoteCamera, setHudOnly } from './mode';
 import { ServerLink } from './serverLink';
 import { View } from './view';
 
@@ -37,6 +37,9 @@ ghost.homeYaw = ghost.yaw = glasses ? -0.68 : -0.68 + Math.PI;
 view.mirror = !glasses;
 document.body.classList.toggle('glasses', glasses);
 let ghostPos: [number, number, number] | null = null;
+// The size of the camera picture: the video's, or (remote camera) the frames the server received.
+let srcW = 1280, srcH = 720;
+let feedOn = false;
 
 const HINT_AFTER_MS = 800; // no confident cube for this long: show the "hold it steady" hint
 let lastConfident = -Infinity;
@@ -46,13 +49,22 @@ link.onFrame = (reply) => {
   const now = performance.now();
   cube.update(reply, now);
   if (reply.confident) lastConfident = now;
-  if (handsMode === 'off' && reply.hands) {  // draw the server's hand points instead
+  if (remoteCamera) { srcW = reply.width; srcH = reply.height; feedOn = true; }
+  if ((handsMode === 'off' || remoteCamera) && reply.hands) {  // draw the server's hand points instead
     hands.hands = reply.hands.map((h) => ({ points: h.points.map(([x, y]) => [x / reply.width, y / reply.height] as [number, number]) }));
   }
   flow.onFrame(reply);
   updateGhost();
 };
-link.onMessage = (msg) => { flow.onMessage(msg); updateGhost(); };
+link.onMessage = (msg) => {
+  if (msg.type === 'feed') {  // remote camera: the bridge app connected / went away
+    feedOn = !!msg.connected;
+    hud.say(feedOn ? '' : "Waiting for the glasses' camera -- start the Cube Tutor Bridge app on the Beam Pro");
+    return;
+  }
+  flow.onMessage(msg);
+  updateGhost();
+};
 
 function updateGhost(): void {
   const t = flow.track;
@@ -98,11 +110,13 @@ function faceOn(c: [number, number][]): boolean {
 }
 
 // ---------- glasses controls: which camera, and camera picture vs floating HUD ----------
-async function setupControls(): Promise<void> {
+async function setupControls(withCameras = true): Promise<void> {
   const box = document.getElementById('controls')!;
   const select = document.getElementById('camera-select') as HTMLSelectElement;
   const toggle = document.getElementById('hud-toggle') as HTMLButtonElement;
+  if (!withCameras) (select.parentElement as HTMLElement).hidden = true;
   const fill = async () => {
+    if (!withCameras) { box.hidden = false; return; }
     const cameras = await listCameras();
     select.innerHTML = '';
     for (const c of cameras) {
@@ -136,9 +150,9 @@ function resize(): void {
 
 function frame(now: number): void {
   requestAnimationFrame(frame);
-  view.update(video.videoWidth || 1280, video.videoHeight || 720, innerWidth, innerHeight);
-  hands.update(video, now);
-  link.pump(video);
+  if (!remoteCamera) { srcW = video.videoWidth || 1280; srcH = video.videoHeight || 720; }
+  view.update(srcW, srcH, innerWidth, innerHeight);
+  if (!remoteCamera) { hands.update(video, now); link.pump(video); }
 
   ctx.clearRect(0, 0, innerWidth, innerHeight);
   const alpha = cube.step(now);
@@ -151,7 +165,7 @@ function frame(now: number): void {
       drawMoveArrows(ctx, view, cube.keypoints, cube.frameW, flow.guide.move, flow.guide.undo, now);
     }
   }
-  if (!hudOnly) drawHands(ctx, hands.hands, view, video.videoHeight || 720, state.error);
+  if (!hudOnly) drawHands(ctx, hands.hands, view, srcH, state.error);
   effects.draw(ctx, now, hudOnly ? null : corners, innerWidth, innerHeight);
   placeGhost(!hudOnly && alpha > 0.5 ? corners : null);
 
@@ -160,7 +174,7 @@ function frame(now: number): void {
   hud.readouts({ fps: frames.length, handsFps: hands.fps, replies: link.repliesPerSecond, latency: link.latencyMs,
                  serverMs: link.serverMs, confidence: cube.confident ? cube.confidence : 0, connected: link.connected });
   const active = state.phase === 'camera' || state.phase === 'scan' || state.phase === 'guided' || state.phase === 'undo';
-  const lostCube = active && link.connected && now - lastConfident > HINT_AFTER_MS;
+  const lostCube = active && link.connected && (!remoteCamera || feedOn) && now - lastConfident > HINT_AFTER_MS;
   hud.showHint(lostCube, !lostCube && active && corners && faceOn(corners)
     ? 'Tilt the cube so you see three sides -- a corner pointing at the camera' : undefined);
 }
@@ -168,6 +182,17 @@ function frame(now: number): void {
 async function boot(): Promise<void> {
   resize();
   addEventListener('resize', resize);
+  if (remoteCamera) {  // the frames come from the bridge app: no camera or hand tracking in this page
+    document.body.classList.add('remote');
+    const picture = document.getElementById('remote-picture') as HTMLImageElement;
+    picture.hidden = false;
+    picture.src = '/feed.mjpg';
+    link.path = '/ws/view';
+    setupControls(false);
+    link.connect();
+    requestAnimationFrame(frame);
+    return;
+  }
   hud.say('Starting the camera…');
   try {
     await startCamera(video);
