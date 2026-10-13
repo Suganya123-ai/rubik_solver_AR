@@ -1,18 +1,80 @@
 # Cube Tutor on the XREAL glasses (branch `xreal-glasses`)
 
-The webcam app, adapted to run in the **Beam Pro's browser** and be seen in
-the **XREAL One Pro** glasses. The laptop still does the heavy work (finding
-the cube, colours, solving, checking moves); the Beam Pro sends camera frames
-to it over Wi-Fi and shows the guidance.
+The tutor seen **in the XREAL One Pro glasses**, using the **glasses' own
+add-on camera** (XREAL Eye), so it sees what you see. The laptop does the
+heavy work (finding the cube, colours, solving, checking moves); a small app
+on the **Beam Pro** reads the glasses' camera, sends the picture to the laptop
+over a hotspot, and shows the tutor on the glasses.
 
 ```
-camera ──► Beam Pro browser ──(Wi-Fi or USB)──► laptop: vision server
-glasses ◄── Beam Pro ◄────────── guidance ──────────┘
+glasses' camera ─► Cube Tutor Bridge (Beam Pro) ──hotspot──► laptop: ./run_glasses.sh
+glasses' screen ◄── tutor, floating in view ◄───────────────┘
+phone screen    ◄── the same tutor, with the buttons (the remote control)
 ```
 
 This branch is separate: the webcam demo (branch `ar-webcam`, port 5173) and
 the original demo (`live-solver`, port 8000) are not changed. It uses its own
 port (5273), so it can run at the same time as the webcam demo.
+
+## Start here: the glasses' own camera (what works today)
+
+**Once:** build and install the bridge app, see [android_bridge/README.md](android_bridge/README.md).
+
+**Each time:**
+
+1. **One network for the laptop and the Beam Pro.** A phone hotspot works
+   (connect both to it). Hotel, guest and office Wi-Fi usually stop devices
+   seeing each other. The Beam Pro has a single data port, used by the
+   glasses, so this link has to be wireless.
+2. **On the laptop:** `./run_glasses.sh`. It prints an address like
+   `https://172.20.10.14:5273/glasses/`; the part to remember is
+   `172.20.10.14:5273`.
+3. **On the Beam Pro:** open **Cube Tutor Bridge**, check the laptop's address,
+   then plug in the glasses and tap **OK** on the USB prompt straight away.
+4. Tap **Start the tutor**, and **OK** straight away on the second prompt (the
+   glasses reconnect when their camera is switched on).
+5. The tutor appears **in the glasses** (floating: ghost cube top right,
+   instruction at the bottom) and **on the phone** (with the buttons). Hold
+   the phone upright; it is the remote control.
+
+**Scanning:** tap **Start scan** on the phone. Show the cube with a corner
+toward you, three sides showing, in the middle of your view at about 25-30 cm,
+and hold still: "3 of 6 sides scanned". Then turn the cube **any way you
+like** to show the rest; sides already scanned may show again, and it tells
+you how many are left (usually the underside last). Check the colours on the
+phone, then **Solve**.
+
+**Solving:** do the move shown, then show the cube again (on your palm or held
+by two opposite sides, a corner toward you) and hold still for half a second.
+A wrong move is announced with the turn that undoes it.
+
+**Buttons on the phone (top bar):**
+
+| Button | What it does |
+|---|---|
+| Zoom 2x | How much of the wide camera view is used: 2x, 3x, 1x. The window follows the cube and searches for it when it is lost. |
+| Glasses: floating / picture | What the glasses show: only the ghost cube and instructions (black is invisible on see-through glasses), or the camera picture with the arrows on the cube. |
+| Camera / Tutor | Show the raw camera picture on the phone instead of the tutor. |
+| Close | Stop. |
+
+### What is not there yet
+
+- Arrows that sit exactly on the real cube *as seen through the lenses*. That
+  needs the camera and the display calibrated to each other.
+- The cube finder was trained on rendered cubes that fill more of the picture.
+  With this wide camera it relies on the zoom window; a model retrained on
+  frames from this camera (the recordings in `data/` are the raw material)
+  would find the cube more often, also while it is held in two hands.
+- Over a phone hotspot about 5-10 frames a second reach the laptop.
+
+## The other way: the Beam Pro's own camera, in its browser
+
+No app needed, but it uses the Beam Pro's back camera (a browser cannot open
+the glasses' camera). Open the address `./run_glasses.sh` prints in Chrome on
+the Beam Pro, accept the certificate warning (Advanced, Proceed) and allow the
+camera. By USB instead of a network: `./run_glasses.sh --usb`, then
+`http://localhost:5273/glasses/` on the Beam Pro (needs `adb` and USB
+debugging; the glasses cannot be plugged in at the same time).
 
 ## What is different from the webcam app
 
@@ -99,20 +161,17 @@ start the scan, show three sides, show the other three, check the colours,
 then follow the moves. Keys work if a keyboard is attached; otherwise use the
 buttons on the card.
 
-## Status
+## Status (13 Oct 2026)
 
-- **Works on a Beam Pro (X4200, Android 14) over USB** (12 Oct 2026): the page
-  loads in Chrome, the back camera streams to the laptop at ~25 replies a
-  second with ~15 ms delay, the cube and the hand are found.
-- **Chrome lists only the Beam Pro's own cameras** ("camera 0, facing back",
-  "camera 1, facing front"). The glasses' add-on camera was not offered to
-  the browser in that test, so for now the Beam Pro's back camera is pointed
-  at the cube. Reading the glasses' camera needs the native app in
-  [xreal_ar/](xreal_ar/README.md) (XREAL's SDK).
-- Also tested on the laptop with a simulated camera through the Wi-Fi address
-  over https: scan, a wrong move, its undo, solved; both views.
-- Not yet checked: a full scan-and-solve on the Beam Pro, and how it looks in
-  the glasses.
+- **Glasses' own camera: working** on the user's XREAL One Pro + Eye + Beam Pro
+  (X4200, Android 14) over a phone hotspot: scans complete, moves are followed
+  (a session reached move 10 of 14, including a wrong move that was undone).
+  The zoom window that follows the cube was added after that session and has
+  not been tried on the device yet.
+- Browser route with the Beam Pro's camera: working over USB (~25 replies/s)
+  and over a hotspot (slower).
+- The laptop side is covered by 97 automated tests and an end-to-end run with
+  a simulated camera.
 
 ## What the glasses offer over USB (checked 13 Oct 2026, XREAL One Pro on a Mac)
 
