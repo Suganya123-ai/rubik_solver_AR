@@ -6,7 +6,7 @@ import type { FrameReply } from './serverLink';
 
 export type Pt = [number, number];
 const EASE = 0.45;          // per animation frame
-const FORGET_MS = 600;      // no cube for this long: overlays fade out
+const FORGET_MS = 600;      // no cube for this long: overlays fade out (default; see forgetMs)
 
 export class CubeView {
   /** Smoothed corner points in the server frame's pixels, or null. */
@@ -15,6 +15,8 @@ export class CubeView {
   confidence = 0;
   confident = false;
   lastSeen = -Infinity;
+  /** No cube for this long: overlays fade out. Longer when frames are sparse (a slow remote camera). */
+  forgetMs = FORGET_MS;
   private target: Pt[] | null = null;
 
   update(reply: FrameReply, now: number): void {
@@ -37,7 +39,7 @@ export class CubeView {
       ] as Pt);
     }
     const age = now - this.lastSeen;
-    if (age > FORGET_MS * 2) { this.keypoints = null; this.target = null; return 0; }
-    return age < FORGET_MS ? 1 : 1 - (age - FORGET_MS) / FORGET_MS;
+    if (age > this.forgetMs * 2) { this.keypoints = null; this.target = null; return 0; }
+    return age < this.forgetMs ? 1 : 1 - (age - this.forgetMs) / this.forgetMs;
   }
 }

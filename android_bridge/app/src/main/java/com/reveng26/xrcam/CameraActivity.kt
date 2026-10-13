@@ -118,7 +118,7 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
             binding.btnToggleView.text = if (showTutor) "Camera" else "Tutor"
         }
         if (server.isNotEmpty()) {
-            uploader = FrameUploader(binding.cameraPreview, server) { status ->
+            uploader = FrameUploader(binding.cameraPreview, server, { surface }) { status ->
                 handler.post { binding.uploadStatusText.text = status }
             }.also { it.start() }
             binding.btnZoom.setOnClickListener {  // how much of the wide camera view is sent: 2x -> 3x -> 1x

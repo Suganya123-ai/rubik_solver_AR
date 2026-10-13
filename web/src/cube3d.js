@@ -181,6 +181,9 @@
 
     _frame(now) {
       requestAnimationFrame(this._frame);
+      // On a busy device (window.lowPowerFps set) redraw less often.
+      if (window.lowPowerFps && now - (this._drawn || 0) < 1000 / window.lowPowerFps) return;
+      this._drawn = now;
       const c = this.canvas;
       if (!this.state || !c.offsetParent) return;  // nothing to show, or hidden
       const dpr = window.devicePixelRatio || 1;

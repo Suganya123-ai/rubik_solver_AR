@@ -144,6 +144,13 @@ async function setupControls(withCameras = true): Promise<void> {
   };
   const applyHud = () => {
     document.body.classList.toggle('hud-only', hudOnly);
+    if (remoteCamera) {
+      // The camera picture is only downloaded while it is shown (in the floating view it is invisible).
+      const picture = document.getElementById('remote-picture') as HTMLImageElement;
+      picture.hidden = hudOnly;
+      if (hudOnly) picture.removeAttribute('src');
+      else if (!picture.getAttribute('src')) picture.src = '/feed.mjpg';
+    }
     toggle.textContent = hudOnly ? 'Show camera picture' : 'Floating display only';
   };
   toggle.onclick = () => { setHudOnly(!hudOnly); applyHud(); };
@@ -159,8 +166,16 @@ function resize(): void {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+// Remote camera (the Beam Pro, which is also decoding the camera video and drawing up to three
+// copies of this page): redraw 15 times a second, not 60. The picture only changes a few
+// times a second anyway.
+const MIN_FRAME_MS = remoteCamera ? 66 : 0;
+let lastDraw = 0;
+
 function frame(now: number): void {
   requestAnimationFrame(frame);
+  if (now - lastDraw < MIN_FRAME_MS) return;
+  lastDraw = now;
   if (!remoteCamera) { srcW = video.videoWidth || 1280; srcH = video.videoHeight || 720; }
   view.update(srcW, srcH, innerWidth, innerHeight);
   if (!remoteCamera) { hands.update(video, now); link.pump(video); }
@@ -195,9 +210,8 @@ async function boot(): Promise<void> {
   addEventListener('resize', resize);
   if (remoteCamera) {  // the frames come from the bridge app: no camera or hand tracking in this page
     document.body.classList.add('remote');
-    const picture = document.getElementById('remote-picture') as HTMLImageElement;
-    picture.hidden = false;
-    picture.src = '/feed.mjpg';
+    (window as unknown as { lowPowerFps: number }).lowPowerFps = 15;  // the ghost cube animates at this rate too
+    cube.forgetMs = 2500;   // frames arrive a few times a second: keep the cube's overlays between them
     link.path = '/ws/view';
     setupControls(false);
     link.connect();

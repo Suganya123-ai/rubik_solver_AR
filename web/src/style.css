@@ -169,3 +169,8 @@ body.display-only .card-label { font-size: 14px; }
 body.glasses .ghost-label { font-size: 8px; bottom: 2px; }
 body.glasses .ghost-warning { left: -10px; width: 30px; font-size: 18px; }
 body.glasses .progress { top: 70px; }
+
+/* Remote camera = the Beam Pro, a busy device: no blur behind the panels (it is costly to draw). */
+body.remote .card, body.remote .review, body.remote .popup, body.remote .hud-stats, body.remote .hud-hint,
+body.remote #controls { backdrop-filter: none; -webkit-backdrop-filter: none; }
+body.remote .card { background: rgba(6, 14, 20, .86); }

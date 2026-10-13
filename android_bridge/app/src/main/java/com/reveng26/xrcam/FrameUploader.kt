@@ -6,6 +6,8 @@ import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.PixelCopy
+import android.view.Surface
 import android.view.TextureView
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -45,12 +47,16 @@ import javax.net.ssl.X509TrustManager
 class FrameUploader(
     private val picture: TextureView,
     private val address: String,
+    /** The surface the decoder draws into (the picture at full size). */
+    private val surface: () -> Surface?,
     private val onStatus: (String) -> Unit,
 ) {
     companion object {
         private const val TAG = "FrameUploader"
         const val WIDTH = 640
         const val HEIGHT = 472          // the camera is 2048x1512
+        private const val VIDEO_WIDTH = 2048
+        private const val VIDEO_HEIGHT = 1512
         private const val QUALITY = 70
         private const val REPLY_TIMEOUT_MS = 2500L
         /** Where the window sits when there is no cube to follow: a little below the middle (hands are low). */
@@ -64,6 +70,7 @@ class FrameUploader(
     private val worker = Executors.newSingleThreadExecutor()
     private val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
     private var full: Bitmap? = null
+    @Volatile private var fastCopy = true
     /** 1 = the whole view; 2 = the middle half, twice as large; 3 = the middle third. */
     @Volatile var zoom = 2
         set(value) { field = value.coerceIn(1, 3) }
@@ -196,37 +203,73 @@ class FrameUploader(
                 return@post
             }
             val z = zoom
-            if (z == 1) {
-                picture.getBitmap(bitmap)
-            } else {  // read the picture z times larger, keep its middle
-                var big = full
-                if (big == null || big.width != WIDTH * z) {
-                    big?.recycle()
-                    big = Bitmap.createBitmap(WIDTH * z, HEIGHT * z, Bitmap.Config.ARGB_8888)
-                    full = big
-                }
-                picture.getBitmap(big)
-                // The window, kept inside the picture.
-                val x = (windowX * big.width - WIDTH / 2f).toInt().coerceIn(0, big.width - WIDTH)
-                val y = (windowY * big.height - HEIGHT / 2f).toInt().coerceIn(0, big.height - HEIGHT)
-                Canvas(bitmap).drawBitmap(big, Rect(x, y, x + WIDTH, y + HEIGHT), Rect(0, 0, WIDTH, HEIGHT), null)
-                sentX = (x + WIDTH / 2f) / big.width
-                sentY = (y + HEIGHT / 2f) / big.height
-            }
             sentZoom = z
-            if (z == 1) { sentX = 0.5f; sentY = 0.5f }
-            worker.execute {
-                try {
-                    val out = ByteArrayOutputStream(48 * 1024)
-                    val id = ++frameId
-                    out.write(byteArrayOf((id ushr 24).toByte(), (id ushr 16).toByte(), (id ushr 8).toByte(), id.toByte()))
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, QUALITY, out)
-                    waitingSince = System.currentTimeMillis()
-                    if (socket?.send(out.toByteArray().toByteString()) != true) waitingSince = 0
-                } catch (e: Exception) {
-                    Log.w(TAG, "send failed", e)
-                    waitingSince = 0
-                }
+            val source = surface()
+            if (z == 1 || source == null || !source.isValid || !fastCopy) {
+                grabSlow(z)
+                encodeAndSend()
+                return@post
+            }
+            // Zoom on the graphics chip: only the window is copied out of the decoder's picture,
+            // already shrunk to the size that is sent. (Reading the whole picture z times larger
+            // and cutting the window out costs 4-9 times as much on an already busy device.)
+            val w = VIDEO_WIDTH / z
+            val h = VIDEO_HEIGHT / z
+            val x = (windowX * VIDEO_WIDTH - w / 2f).toInt().coerceIn(0, VIDEO_WIDTH - w)   // keep the window inside the picture
+            val y = (windowY * VIDEO_HEIGHT - h / 2f).toInt().coerceIn(0, VIDEO_HEIGHT - h)
+            sentX = (x + w / 2f) / VIDEO_WIDTH
+            sentY = (y + h / 2f) / VIDEO_HEIGHT
+            try {
+                PixelCopy.request(source, Rect(x, y, x + w, y + h), bitmap, { result ->
+                    if (result != PixelCopy.SUCCESS) {  // not supported for this surface: use the slow way from now on
+                        Log.w(TAG, "fast copy failed ($result), using the slow way")
+                        fastCopy = false
+                        grabSlow(z)
+                    }
+                    encodeAndSend()
+                }, main)
+            } catch (e: Exception) {
+                Log.w(TAG, "fast copy refused, using the slow way", e)
+                fastCopy = false
+                grabSlow(z)
+                encodeAndSend()
+            }
+        }
+    }
+
+    /** The window read through the view: the picture z times larger, then its window cut out. */
+    private fun grabSlow(z: Int) {
+        if (z == 1) {
+            picture.getBitmap(bitmap)
+            sentX = 0.5f; sentY = 0.5f
+            return
+        }
+        var big = full
+        if (big == null || big.width != WIDTH * z) {
+            big?.recycle()
+            big = Bitmap.createBitmap(WIDTH * z, HEIGHT * z, Bitmap.Config.ARGB_8888)
+            full = big
+        }
+        picture.getBitmap(big)
+        val x = (windowX * big.width - WIDTH / 2f).toInt().coerceIn(0, big.width - WIDTH)
+        val y = (windowY * big.height - HEIGHT / 2f).toInt().coerceIn(0, big.height - HEIGHT)
+        Canvas(bitmap).drawBitmap(big, Rect(x, y, x + WIDTH, y + HEIGHT), Rect(0, 0, WIDTH, HEIGHT), null)
+        sentX = (x + WIDTH / 2f) / big.width
+        sentY = (y + HEIGHT / 2f) / big.height
+    }
+
+    private fun encodeAndSend() {
+        worker.execute {
+            try {
+                val out = ByteArrayOutputStream(48 * 1024)
+                val id = ++frameId
+                out.write(byteArrayOf((id ushr 24).toByte(), (id ushr 16).toByte(), (id ushr 8).toByte(), id.toByte()))
+                bitmap.compress(Bitmap.CompressFormat.JPEG, QUALITY, out)
+                waitingSince = System.currentTimeMillis()
+                if (socket?.send(out.toByteArray().toByteString()) != true) waitingSince = 0
+            } catch (e: Exception) {
+                Log.w(TAG, "send failed", e)
+                waitingSince = 0
             }
         }
     }
