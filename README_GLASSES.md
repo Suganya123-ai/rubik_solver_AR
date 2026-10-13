@@ -89,7 +89,7 @@ debugging; the glasses cannot be plugged in at the same time).
 
 `?mode=laptop` on the address switches back to the webcam behaviour.
 
-## Run it
+## The browser route in detail
 
 On the laptop (Python 3.11+ and Node.js 20.19+):
 
@@ -126,19 +126,11 @@ a phone hotspot for both, or the USB way below.
 3. On the laptop: `./run_glasses.sh --usb` (needs `adb`, from Android platform-tools).
 4. On the Beam Pro open `http://localhost:5273/glasses/`.
 
-## Which camera? (the thing to find out first)
+## Which camera a browser can use
 
-The **Camera** list shows every camera Chrome can use on the Beam Pro.
-
-- **If the glasses' add-on camera (XREAL Eye) is in the list:** pick it. The
-  camera then sees what you see, hands-free. This is the result we want.
-- **If only the Beam Pro's own cameras are listed:** the Eye is not offered to
-  browsers (XREAL's own SDK may be the only way to read it). The app still
-  works with the Beam Pro's rear camera pointed at the cube, for trying it
-  out, and the next step is the native app in [xreal_ar/](xreal_ar/README.md),
-  which reads the Eye through XREAL's SDK.
-
-Please note down exactly what the list shows; it decides the next step.
+Chrome on the Beam Pro lists only the Beam Pro's own cameras ("camera 0,
+facing back", "camera 1, facing front"). The glasses' add-on camera is never
+offered to a browser, which is why the bridge app exists.
 
 ## Two ways to look at it
 
@@ -154,7 +146,7 @@ Arrows that sit exactly on the real cube *as seen through the lenses* need the
 glasses' camera and display to be calibrated to each other. That is not done
 yet; it belongs with the native app.
 
-## Using it
+## Using the browser route
 
 The same steps as the webcam app ([README_WEBCAM.md](README_WEBCAM.md)):
 start the scan, show three sides, show the other three, check the colours,
