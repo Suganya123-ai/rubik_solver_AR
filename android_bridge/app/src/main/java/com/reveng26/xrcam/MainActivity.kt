@@ -48,7 +48,7 @@ class MainActivity : AppCompatActivity(), GlassesConnection.Listener {
 
         // The laptop running the Cube Tutor server (./run_glasses.sh prints its address).
         val prefs = getSharedPreferences("bridge", Context.MODE_PRIVATE)
-        binding.serverAddress.setText(prefs.getString("address", "172.20.10.14:5273"))
+        binding.serverAddress.setText(prefs.getString("address", ""))  // typed once; ./run_glasses.sh prints it
 
         binding.btnStartCamera.setOnClickListener {
             prefs.edit().putString("address", serverAddress()).apply()

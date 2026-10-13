@@ -36,7 +36,7 @@
         android:id="@+id/serverAddress"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
-        android:hint="Laptop address, e.g. 172.20.10.14:5273"
+        android:hint="Laptop, e.g. My-MacBook.local:5273"
         android:inputType="textUri"
         android:singleLine="true"
         android:textColor="#FFFFFFFF"

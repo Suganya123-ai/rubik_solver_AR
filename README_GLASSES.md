@@ -27,10 +27,12 @@ port (5273), so it can run at the same time as the webcam demo.
    seeing each other. The Beam Pro has a single data port, used by the
    glasses, so this link has to be wireless.
 2. **On the laptop:** `./run_glasses.sh`. It prints an address like
-   `https://172.20.10.14:5273/glasses/`; the part to remember is
-   `172.20.10.14:5273`.
-3. **On the Beam Pro:** open **Cube Tutor Bridge**, check the laptop's address,
-   then plug in the glasses and tap **OK** on the USB prompt straight away.
+   `https://172.20.10.14:5273/glasses/`, and the laptop's name for the app,
+   like `My-MacBook.local:5273`.
+3. **On the Beam Pro:** open **Cube Tutor Bridge**, check the laptop's address
+   (use the **name** the script prints, e.g. `My-MacBook.local:5273`: the
+   number changes when the hotspot reconnects, the name does not), then plug
+   in the glasses and tap **OK** on the USB prompt straight away.
 4. Tap **Start the tutor**, and **OK** straight away on the second prompt (the
    glasses reconnect when their camera is switched on).
 5. The tutor appears **in the glasses** (floating: ghost cube top right,

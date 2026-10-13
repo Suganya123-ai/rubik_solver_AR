@@ -37,8 +37,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 1. On the laptop: `./run_glasses.sh` (in the repository root). Note the address it prints.
 2. Laptop and Beam Pro on the same network (a phone hotspot works; hotel Wi-Fi usually does not).
-3. On the Beam Pro: open **Cube Tutor Bridge**, type the laptop's address
-   (e.g. `172.20.10.14:5273`), then plug in the glasses.
+3. On the Beam Pro: open **Cube Tutor Bridge**, type the laptop's address,
+   then plug in the glasses. Use the laptop's **name** (`./run_glasses.sh`
+   prints it, e.g. `My-MacBook.local:5273`) rather than its number: a hotspot
+   gives the laptop a new number when it reconnects, and the app then can't
+   find it ("Can't reach ..." at the top of the phone screen).
 4. Tap **OK** on the USB prompt straight away, tap **Start the tutor**, and
    tap **OK** on the second prompt straight away (the glasses reconnect).
 5. The tutor appears. Bottom left shows the upload speed. **Camera** (bottom

@@ -34,7 +34,12 @@ if [ ! -f .certs/cert.pem ] || [ "$(cat .certs/ip 2>/dev/null)" != "$IP" ]; then
     -subj "/CN=Cube Tutor ($IP)" -addext "subjectAltName=IP:$IP,IP:127.0.0.1,DNS:localhost" >/dev/null 2>&1
   echo "$IP" > .certs/ip
 fi
+NAME=$(scutil --get LocalHostName 2>/dev/null || hostname -s 2>/dev/null || echo "")
 echo "On the Beam Pro (same Wi-Fi) open:  https://${IP}:${PORT}/glasses/"
+if [ -n "$NAME" ]; then
+  # A hotspot hands out a new number when devices reconnect; the name stays the same.
+  echo "In the Cube Tutor Bridge app, use this laptop's NAME as the address:  ${NAME}.local:${PORT}"
+fi
 echo "The browser warns about the certificate once: choose Advanced, then Proceed."
 exec "$PY" -m uvicorn glasses_server:app --host 0.0.0.0 --port "$PORT" \
   --ssl-keyfile .certs/key.pem --ssl-certfile .certs/cert.pem
