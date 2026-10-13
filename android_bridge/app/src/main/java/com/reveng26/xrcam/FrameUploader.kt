@@ -28,8 +28,13 @@ import javax.net.ssl.X509TrustManager
  * the middle of it as JPEG over a WebSocket (/ws/feed: 4-byte frame number +
  * JPEG). The glasses' camera is wide-angle (2048x1512): shrunk whole to 640
  * wide, a cube held at arm's length is only ~120 pixels across and the cube
- * finder misses it, so the middle is cut out at [zoom]x instead (sharp, because
- * it comes from the full-size picture). One frame is in flight at a time: the next is sent when the server
+ * finder misses it, so a window is cut out at [zoom]x instead (sharp, because
+ * it comes from the full-size picture).
+ *
+ * The window follows the cube: the server says where the cube is in each
+ * frame, and when it drifts toward the window's edge the window moves onto it.
+ * While the cube is not found, the window searches -- hands are usually lower
+ * than the middle of the view, so it starts a little below centre. One frame is in flight at a time: the next is sent when the server
  * has answered, so a slow network never builds a queue.
  *
  * The server uses a certificate it made itself (browsers only allow cameras on
@@ -47,6 +52,13 @@ class FrameUploader(
         const val HEIGHT = 472          // the camera is 2048x1512
         private const val QUALITY = 70
         private const val REPLY_TIMEOUT_MS = 2500L
+        /** Where to look for the cube, in turn, while it is not found (centre of the window, 0..1 of the view). */
+        private val SEARCH = arrayOf(
+            floatArrayOf(0.50f, 0.58f), floatArrayOf(0.50f, 0.74f), floatArrayOf(0.32f, 0.66f),
+            floatArrayOf(0.68f, 0.66f), floatArrayOf(0.50f, 0.40f))
+        private const val SEARCH_AFTER_MS = 1500L    // no cube for this long: start looking elsewhere
+        private const val SEARCH_STEP_MS = 700L      // stay this long on each place
+        private const val EDGE = 0.22f               // the cube this far from the window's middle: re-centre on it
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -56,6 +68,17 @@ class FrameUploader(
     /** 1 = the whole view; 2 = the middle half, twice as large; 3 = the middle third. */
     @Volatile var zoom = 2
         set(value) { field = value.coerceIn(1, 3) }
+
+    // Where the window is: its centre, as a fraction of the camera's view.
+    @Volatile private var windowX = SEARCH[0][0]
+    @Volatile private var windowY = SEARCH[0][1]
+    // The window as it was for the frame now with the server (to place the cube it reports).
+    private var sentX = windowX
+    private var sentY = windowY
+    private var sentZoom = 2
+    private var lastFound = 0L
+    private var searchStep = 0
+    private var searchMoved = 0L
     private val client: OkHttpClient
     private var socket: WebSocket? = null
     @Volatile private var running = false
@@ -109,6 +132,7 @@ class FrameUploader(
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {  // the server finished that frame
+            follow(text)
             lastRoundTrip = System.currentTimeMillis() - waitingSince
             waitingSince = 0
             sent++
@@ -134,6 +158,36 @@ class FrameUploader(
         }
     }
 
+    /** Keeps the window on the cube (from the server's reply), or moves on with the search. */
+    private fun follow(reply: String) {
+        val now = System.currentTimeMillis()
+        try {
+            val json = org.json.JSONObject(reply)
+            if (json.optBoolean("found") && json.has("cx")) {
+                lastFound = now
+                val z = sentZoom.toFloat()
+                // The cube's place in the whole view: the window's corner plus its place inside the window.
+                val cubeX = sentX + (json.getDouble("cx").toFloat() - 0.5f) / z
+                val cubeY = sentY + (json.getDouble("cy").toFloat() - 0.5f) / z
+                val offX = (cubeX - windowX) * z
+                val offY = (cubeY - windowY) * z
+                // Only move when the cube nears the edge: a window that moved every frame would
+                // make a cube held still look as if it were moving.
+                if (kotlin.math.abs(offX) > EDGE || kotlin.math.abs(offY) > EDGE) {
+                    windowX = cubeX
+                    windowY = cubeY
+                }
+                return
+            }
+        } catch (_: Exception) { /* a reply that isn't a frame result */ }
+        if (zoom > 1 && now - lastFound > SEARCH_AFTER_MS && now - searchMoved > SEARCH_STEP_MS) {
+            searchStep = (searchStep + 1) % SEARCH.size
+            windowX = SEARCH[searchStep][0]
+            windowY = SEARCH[searchStep][1]
+            searchMoved = now
+        }
+    }
+
     /** Grabs the current picture (must be on the main thread), then encodes and sends it off the main thread. */
     private fun sendNext() {
         if (!running) return
@@ -154,10 +208,15 @@ class FrameUploader(
                     full = big
                 }
                 picture.getBitmap(big)
-                val x = (big.width - WIDTH) / 2
-                val y = (big.height - HEIGHT) / 2
+                // The window, kept inside the picture.
+                val x = (windowX * big.width - WIDTH / 2f).toInt().coerceIn(0, big.width - WIDTH)
+                val y = (windowY * big.height - HEIGHT / 2f).toInt().coerceIn(0, big.height - HEIGHT)
                 Canvas(bitmap).drawBitmap(big, Rect(x, y, x + WIDTH, y + HEIGHT), Rect(0, 0, WIDTH, HEIGHT), null)
+                sentX = (x + WIDTH / 2f) / big.width
+                sentY = (y + HEIGHT / 2f) / big.height
             }
+            sentZoom = z
+            if (z == 1) { sentX = 0.5f; sentY = 0.5f }
             worker.execute {
                 try {
                     val out = ByteArrayOutputStream(48 * 1024)

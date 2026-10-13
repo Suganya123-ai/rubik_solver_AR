@@ -78,6 +78,7 @@ class LiveClient:
         self.busy = BusyHands()   # are the hands turning the cube right now?
         self.recorder = None      # SessionRecorder while solving
         self._scan_dir = None     # where the current scan's views are recorded
+        self._miss_saved = 0.0    # when a "cube not found" frame was last saved
         self._seen = {}           # frame counts since the last log line
         self._logged_at = time.monotonic()
 
@@ -106,6 +107,12 @@ class LiveClient:
                          self.scan.result['valid'], len(self.scan.result['doubtful']))
                 self.scan = None
         if self.track is not None:
+            # A sample of the frames where the cube wasn't found (one every 2 s): they show why
+            # tracking stalls, and are what a detector trained for this camera needs.
+            if self.recorder and not result.get('confident') and time.monotonic() - self._miss_saved > 2.0:
+                self._miss_saved = time.monotonic()
+                self.recorder.write({'missed': True, 'confidence': result.get('confidence'),
+                                     'hands': len(result.get('hands') or [])}, jpeg)
             result['track'] = _describe(self.track.feed(result))
             event = result['track']['event']
             if event and event != 'unsure':

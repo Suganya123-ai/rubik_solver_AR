@@ -164,3 +164,8 @@ body.display-only .card { bottom: 6vh; }
 body.display-only .card-main { font-size: 34px; }
 body.display-only .card-text { font-size: 20px; }
 body.display-only .card-label { font-size: 14px; }
+
+/* On the glasses the ghost cube is small and fixed top-right: a lighter frame and label. */
+body.glasses .ghost-label { font-size: 8px; bottom: 2px; }
+body.glasses .ghost-warning { left: -10px; width: 30px; font-size: 18px; }
+body.glasses .progress { top: 70px; }

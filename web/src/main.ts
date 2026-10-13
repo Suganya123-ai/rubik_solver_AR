@@ -79,6 +79,16 @@ function updateGhost(): void {
 function placeGhost(corners: [number, number][] | null): void {
   if (ghostBox.hidden) return;
   let x: number, y: number, size: number;
+  if (glasses) {
+    // On the glasses the ghost cube stays put, small, in the top-right corner (it doesn't follow the cube).
+    size = Math.max(110, Math.min(200, Math.min(innerWidth, innerHeight) * 0.24));
+    x = innerWidth - size - (displayOnly ? 28 : 12);
+    y = displayOnly ? 28 : 64;   // (below the phone page's own top button)
+    ghostPos = [x, y, size];
+    ghostBox.style.transform = `translate(${x}px, ${y}px)`;
+    ghostBox.style.width = ghostBox.style.height = `${size}px`;
+    return;
+  }
   if (corners) {
     const xs = corners.map((p) => p[0]), ys = corners.map((p) => p[1]);
     const left = Math.min(...xs), right = Math.max(...xs), top = Math.min(...ys), bottom = Math.max(...ys);

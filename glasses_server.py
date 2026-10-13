@@ -96,8 +96,17 @@ async def feed_socket(ws: WebSocket):
             if reply.get('type') == 'frame':
                 r.jpeg = data[4:]
                 r.count += 1
-            await ws.send_json({'type': reply.get('type'), 'frame': reply.get('frame'), 'ms': reply.get('ms'),
-                                'found': bool(reply.get('keypoints')), 'message': reply.get('message')})
+            # Where the cube is in the frame that was sent (0..1), so the uploader can keep its
+            # zoom window on the cube instead of only looking at the middle of the camera's view.
+            short = {'type': reply.get('type'), 'frame': reply.get('frame'), 'ms': reply.get('ms'),
+                     'found': bool(reply.get('keypoints')), 'message': reply.get('message')}
+            if reply.get('keypoints'):
+                xs = [p[0] for p in reply['keypoints']]
+                ys = [p[1] for p in reply['keypoints']]
+                short['cx'] = round((min(xs) + max(xs)) / 2 / reply['width'], 4)
+                short['cy'] = round((min(ys) + max(ys)) / 2 / reply['height'], 4)
+                short['size'] = round((max(xs) - min(xs)) / reply['width'], 4)
+            await ws.send_json(short)
             await r.broadcast(reply)
     except WebSocketDisconnect:
         pass

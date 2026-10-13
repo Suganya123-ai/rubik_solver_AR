@@ -135,6 +135,7 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
                         screen.floatingOnly -> "Glasses: floating"
                         else -> "Glasses: picture"
                     }
+                    binding.btnGlassesView.alpha = if (showing) 1f else 0.5f
                 }
                 binding.btnGlassesView.setOnClickListener {
                     screen.floatingOnly = !screen.floatingOnly
