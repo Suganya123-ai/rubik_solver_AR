@@ -156,3 +156,11 @@ body.glasses .turning { top: 64px; }  /* below the camera chooser */
 #remote-picture[hidden] { display: none; }
 body.hud-only #remote-picture { visibility: hidden; }
 body.remote #video { display: none; }
+
+/* The glasses' own screen: looked at, never touched -- no buttons; the phone has them. */
+body.display-only .card-buttons, body.display-only #controls, body.display-only #review-buttons,
+body.display-only .palette, body.display-only #popup-close { display: none !important; }
+body.display-only .card { bottom: 6vh; }
+body.display-only .card-main { font-size: 34px; }
+body.display-only .card-text { font-size: 20px; }
+body.display-only .card-label { font-size: 14px; }

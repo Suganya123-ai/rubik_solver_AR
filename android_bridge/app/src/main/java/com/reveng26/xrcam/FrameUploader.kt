@@ -1,6 +1,8 @@
 package com.reveng26.xrcam
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -22,9 +24,12 @@ import javax.net.ssl.X509TrustManager
 /**
  * Sends the camera picture to the Cube Tutor server on the laptop.
  *
- * Takes the picture the decoder is already drawing (the TextureView), shrinks
- * it, and uploads it as JPEG over a WebSocket (/ws/feed: 4-byte frame number +
- * JPEG). One frame is in flight at a time: the next is sent when the server
+ * Takes the picture the decoder is already drawing (the TextureView) and uploads
+ * the middle of it as JPEG over a WebSocket (/ws/feed: 4-byte frame number +
+ * JPEG). The glasses' camera is wide-angle (2048x1512): shrunk whole to 640
+ * wide, a cube held at arm's length is only ~120 pixels across and the cube
+ * finder misses it, so the middle is cut out at [zoom]x instead (sharp, because
+ * it comes from the full-size picture). One frame is in flight at a time: the next is sent when the server
  * has answered, so a slow network never builds a queue.
  *
  * The server uses a certificate it made itself (browsers only allow cameras on
@@ -47,6 +52,10 @@ class FrameUploader(
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
+    private var full: Bitmap? = null
+    /** 1 = the whole view; 2 = the middle half, twice as large; 3 = the middle third. */
+    @Volatile var zoom = 2
+        set(value) { field = value.coerceIn(1, 3) }
     private val client: OkHttpClient
     private var socket: WebSocket? = null
     @Volatile private var running = false
@@ -134,7 +143,21 @@ class FrameUploader(
                 main.postDelayed({ sendNext() }, 200)
                 return@post
             }
-            picture.getBitmap(bitmap)
+            val z = zoom
+            if (z == 1) {
+                picture.getBitmap(bitmap)
+            } else {  // read the picture z times larger, keep its middle
+                var big = full
+                if (big == null || big.width != WIDTH * z) {
+                    big?.recycle()
+                    big = Bitmap.createBitmap(WIDTH * z, HEIGHT * z, Bitmap.Config.ARGB_8888)
+                    full = big
+                }
+                picture.getBitmap(big)
+                val x = (big.width - WIDTH) / 2
+                val y = (big.height - HEIGHT) / 2
+                Canvas(bitmap).drawBitmap(big, Rect(x, y, x + WIDTH, y + HEIGHT), Rect(0, 0, WIDTH, HEIGHT), null)
+            }
             worker.execute {
                 try {
                     val out = ByteArrayOutputStream(48 * 1024)

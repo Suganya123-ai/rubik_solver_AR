@@ -13,7 +13,7 @@ import { describe, holdHint } from './moveText';
 import type { FrameReply, Message, ServerLink } from './serverLink';
 
 type ScanStatus = { phase: string; instruction: string | null; steady: number; needed: number;
-  scanned_centres?: [number, number, number][]; repeated?: string;
+  scanned_centres?: [number, number, number][]; sides_done?: number; refused?: string;
   message: string | null; captured: number[]; event: string | null };
 type ScanResult = { colors: Record<string, string[]>; doubtful: string[]; valid: boolean; centers: Record<string, string> };
 export type Track = { phase: string; step: number; total: number; move: string | null; undo: string[];
@@ -93,7 +93,11 @@ export class Flow {
     this.el.turning.hidden = !(reply.hands_busy && (this.state.phase === 'scan' || this.state.phase === 'guided' || this.state.phase === 'undo'));
     this.el['bar-cube'].style.height = `${Math.round((reply.confident ? reply.confidence ?? 0 : 0) * 100)}%`;
     if (reply.scan_result) { this.showReview(reply.scan_result as unknown as ScanResult, true); return; }
-    if (reply.scan) this.showScan(reply.scan as unknown as ScanStatus);
+    if (reply.scan) {
+      const scan = reply.scan as unknown as ScanStatus;
+      if (this.state.phase !== 'scan' && (scan.phase === 'view1' || scan.phase === 'view2')) this.enterScan();
+      this.showScan(scan);
+    }
     if (reply.track) this.showTrack(reply.track as unknown as Track);
   }
 
@@ -101,6 +105,7 @@ export class Flow {
     if (msg.type === 'scan_result') this.showReview(msg.scan_result as ScanResult, false);
     else if (msg.type === 'track') this.showTrack(msg.track as Track);
     else if (msg.type === 'scan' && (msg.scan as ScanStatus).phase === 'off') this.idle();
+    else if (msg.type === 'scan') this.enterScan();  // a scan was started (here, or on another screen of this session)
     else if (msg.type === 'error' && this.state.phase === 'review') {
       this.el['review-title'].textContent = String(msg.message ?? 'That cube cannot be solved -- check the colours.');
     }
@@ -122,11 +127,20 @@ export class Flow {
 
   private startScan(): void {
     this.ensureAudio();
+    this.link.send({ type: 'scan_start' });
+    this.enterScan();
+  }
+
+  /** Shows the scanning stage. Also used when another screen of the same session started the scan. */
+  private enterScan(): void {
+    if (this.state.phase === 'scan') return;
     this.review = null; this.locked = {}; this.selected = null;
     this.el.review.hidden = true;
     this.el.stats.hidden = true;
+    this.el.popup.hidden = true;
+    this.guide = null;
+    this.track = null;
     this.state.set('scan');
-    this.link.send({ type: 'scan_start' });
     this.card('Scan 1 of 2', '', 'Hold the cube still', '', [['Cancel  (Esc)', () => this.cancel(), '']]);
   }
 
@@ -137,31 +151,34 @@ export class Flow {
 
   private showScan(s: ScanStatus): void {
     if (this.state.phase !== 'scan' || s.phase === 'off' || s.phase === 'done') return;
-    const n = s.phase === 'view2' ? 2 : 1;
+    const sides = s.sides_done ?? 0;
     this.steady(s.steady / s.needed);
-    // Side 1's centre colours: for side 2 these sides must NOT face the camera.
+    // Centre colours of the sides scanned so far.
     const done = (s.scanned_centres ?? []).map(([r, g, b]) => `<i style="background:rgb(${r},${g},${b})"></i>`).join('');
-    const doneText = done ? 'Already scanned (keep these away from the camera): ' : '';
     const cancel: [string, () => void, string][] = [['Cancel  (Esc)', () => this.cancel(), '']];
+    const label = `Scan · ${sides} of 6 sides`;
     if (s.event === 'captured') {
       this.beep(1);
       this.effects.check(performance.now());
-      this.card('✓ Side 1 of 2 captured', done, 'Now show the other three sides', s.instruction ?? '', cancel, 'good');
+      const left = 6 - sides;
+      this.card(`✓ ${sides} of 6 sides scanned`, done, left === 1 ? 'Now show the last side' : 'Now show the other sides',
+        'Turn the cube any way you like, a corner toward the camera. ' +
+        (left === 1 ? 'The side still missing is usually the underside.' : 'Sides already scanned may show again.'), cancel, 'good');
       this.holdUntil = performance.now() + 3000;
       return;
     }
     if (performance.now() < this.holdUntil) return;
     if (s.message) {
-      this.card(`Scan ${n} of 2`, done || '!', 'A scanned side is showing again', s.message, cancel, 'warn');
+      this.card(label, done || '!', s.refused === 'nothing new' ? 'Those sides are already scanned' : 'Hold the cube corner-on',
+        s.message, cancel, 'warn');
       this.holdUntil = performance.now() + 2500;
       return;
     }
-    if (n === 2) {
-      this.card('Scan 2 of 2', done, s.steady ? 'Hold still…' : 'Show the other three sides',
-        doneText + (s.instruction ?? ''), cancel);
+    if (sides > 0) {
+      this.card(label, done, s.steady ? 'Hold still…' : 'Show the sides not scanned yet', s.instruction ?? '', cancel);
       return;
     }
-    this.card('Scan 1 of 2', '', s.steady ? 'Hold still…' : 'Show the cube corner-on', s.instruction ?? '', cancel);
+    this.card(label, '', s.steady ? 'Hold still…' : 'Show the cube corner-on', s.instruction ?? '', cancel);
   }
 
   private showReview(r: ScanResult, fresh: boolean): void {

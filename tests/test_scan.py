@@ -243,12 +243,61 @@ def test_view2_accepted_whichever_way_the_new_corner_is_held():
         assert res['valid'] and ''.join(res['state'].arr) == ''.join(state.arr)
 
 
-def test_refusal_names_where_the_repeated_side_is():
-    views = _views(_scrambled(19))
+def _view_held(state, hold):
+    """What the reader returns for the cube held the given way (a rotation matrix)."""
+    from cube.scan import view_facelets
+    rgb = [RGB[x] for x in state.arr]
+    idx = view_facelets(2, hold)
+    return {vf: [rgb[i] for i in idx[9 * n:9 * n + 9]] for n, vf in enumerate('UFR')}
+
+
+def _capture(session, reading):
+    """Holds a view still until something happens; returns that status."""
+    last = None
+    for _ in range(12 * STEADY_FRAMES):
+        last = _feed(session, _frame(reading))
+        if last['event'] or last['message']:
+            return last
+    return last
+
+
+def test_turning_the_cube_round_then_showing_the_underside_scans_it_in_three_views():
+    # The natural way: same side on top, cube turned round (two new sides), then the underside.
+    import numpy as np
+    from cube.scan import all_holds
+    state = _scrambled(19)
+    round_the_back = np.diag([-1, 1, -1])                       # half a turn about the vertical: Top, Back, Left
+    underside = next(m for m in all_holds() if _faces_seen(m) == ['D', 'F', 'L'] or set(_faces_seen(m)) == {'D', 'F', 'L'})
     s = ScanSession()
-    for _ in range(STEADY_FRAMES):
-        _feed(s, _frame(views[1]))
-    again = {'U': views[2]['U'], 'F': views[2]['F'], 'R': views[1]['R']}  # turned the wrong way: old Right shows
-    seen = [_feed(s, _frame(again)) for _ in range(10 * STEADY_FRAMES)]  # (past the 3 s grace after side 1)
-    assert any(st.get('repeated') == 'R' and st['message'] and 'on the right' in st['message'] for st in seen)
-    assert s.view == 2
+    st = _capture(s, _views(state)[1])
+    assert st['event'] == 'captured' and st['sides_done'] == 3
+    st = _capture(s, _view_held(state, round_the_back))
+    assert st['event'] == 'captured' and st['sides_done'] == 5 and '1 side left' in st['message']
+    st = _capture(s, _view_held(state, underside))
+    assert st['event'] == 'done' and s.result['valid'] and ''.join(s.result['state'].arr) == ''.join(state.arr)
+
+
+def _faces_seen(hold):
+    from cube.scan import view_facelets
+    idx = view_facelets(2, hold)
+    return [FACES[idx[9 * i + 4] // 9] for i in range(3)]
+
+
+def test_a_view_of_sides_already_scanned_asks_for_the_missing_ones():
+    state = _scrambled(20)
+    s = ScanSession()
+    _capture(s, _views(state)[1])
+    seen = [_feed(s, _frame(_views(state)[1])) for _ in range(10 * STEADY_FRAMES)]   # same view, past the grace period
+    said = [st for st in seen if st['message']]
+    assert said and said[-1]['refused'] == 'nothing new' and '3 sides' in said[-1]['message'] and s.views == 1
+
+
+def test_a_view_that_cannot_be_placed_is_not_added():
+    state = _scrambled(21)
+    views = _views(state)
+    s = ScanSession()
+    _capture(s, views[1])
+    nonsense = {'U': views[2]['U'], 'F': views[1]['F'], 'R': views[2]['R']}   # not a way a cube can be held
+    seen = [_feed(s, _frame(nonsense)) for _ in range(10 * STEADY_FRAMES)]
+    assert all(st['event'] is None for st in seen) and s.views == 1
+    assert any(st.get('refused') == 'unclear' for st in seen)

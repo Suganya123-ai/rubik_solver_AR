@@ -22,3 +22,7 @@ export const handsMode = params.get('hands') ?? (glasses ? 'off' : 'gpu');
  *  reads the glasses' add-on camera) uploads the frames to the server, and this
  *  page shows the results and the picture the server received. `?camera=remote` */
 export const remoteCamera = params.get('camera') === 'remote';
+
+/** This page is only looked at (the glasses' own screen, which can't be touched);
+ *  the buttons are on another screen showing the same session. `?display=glasses` */
+export const displayOnly = params.get('display') === 'glasses';

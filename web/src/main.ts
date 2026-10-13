@@ -14,7 +14,7 @@ import { Effects } from './overlay/effects';
 import { drawMoveArrows } from './overlay/moveArrows';
 import { drawHands } from './overlay/handMesh';
 import { Hud } from './overlay/hud';
-import { glasses, handsMode, hudOnly, remoteCamera, setHudOnly } from './mode';
+import { displayOnly, glasses, handsMode, hudOnly, remoteCamera, setHudOnly } from './mode';
 import { ServerLink } from './serverLink';
 import { View } from './view';
 
@@ -36,6 +36,7 @@ const ghost = new window.CubeHologram(document.getElementById('ghost-canvas') as
 ghost.homeYaw = ghost.yaw = glasses ? -0.68 : -0.68 + Math.PI;
 view.mirror = !glasses;
 document.body.classList.toggle('glasses', glasses);
+document.body.classList.toggle('display-only', displayOnly);
 let ghostPos: [number, number, number] | null = null;
 // The size of the camera picture: the video's, or (remote camera) the frames the server received.
 let srcW = 1280, srcH = 720;

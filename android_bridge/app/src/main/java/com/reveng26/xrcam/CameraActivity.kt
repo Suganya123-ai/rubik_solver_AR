@@ -47,6 +47,7 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
 
     private var surface: Surface? = null
     private var uploader: FrameUploader? = null
+    private var glassesScreen: GlassesScreen? = null
     private var frameCount = 0L
     private var lastFpsTime = 0L
     private var fpsFrameCount = 0
@@ -120,6 +121,27 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
             uploader = FrameUploader(binding.cameraPreview, server) { status ->
                 handler.post { binding.uploadStatusText.text = status }
             }.also { it.start() }
+            binding.btnZoom.setOnClickListener {  // how much of the wide camera view is sent: 2x -> 3x -> 1x
+                val up = uploader ?: return@setOnClickListener
+                up.zoom = if (up.zoom >= 3) 1 else up.zoom + 1
+                binding.btnZoom.text = "Zoom ${up.zoom}x"
+            }
+            // The glasses are a second screen: put the tutor there (this phone keeps the buttons).
+            glassesScreen = GlassesScreen(this, server).also { screen ->
+                screen.onChange = { showing ->
+                    binding.btnGlassesView.isEnabled = showing
+                    binding.btnGlassesView.text = when {
+                        !showing -> "No glasses screen"
+                        screen.floatingOnly -> "Glasses: floating"
+                        else -> "Glasses: picture"
+                    }
+                }
+                binding.btnGlassesView.setOnClickListener {
+                    screen.floatingOnly = !screen.floatingOnly
+                    binding.btnGlassesView.text = if (screen.floatingOnly) "Glasses: floating" else "Glasses: picture"
+                }
+                screen.start()
+            }
         }
 
         binding.cameraStatusText.text = "Searching for ${cameraType.name} camera..."
@@ -186,6 +208,8 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
         super.onDestroy()
         uploader?.stop()
         uploader = null
+        glassesScreen?.stop()
+        glassesScreen = null
         binding.tutorView.destroy()
         cameraHelper.stopStream()
         releaseDecoder()

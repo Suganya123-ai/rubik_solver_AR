@@ -29,8 +29,8 @@ VIEW_ROTATIONS = {
 }
 VIEW_INSTRUCTIONS = {
     1: 'Hold the cube corner-on so the camera sees its Top, Front and Right sides.',
-    2: 'Now show the three sides you have not shown yet: turn the cube so the corner that was pointing '
-       'away from the camera points at it.',
+    2: 'Now turn the cube to show the sides you have not shown yet, any way round, '
+       'with a corner toward the camera so three sides show.',
 }
 OPPOSITE_COLOR = {'white': 'yellow', 'yellow': 'white', 'red': 'orange', 'orange': 'red',
                   'green': 'blue', 'blue': 'green'}
@@ -79,6 +79,19 @@ def _view2_holds():
             for row, (col, sign) in enumerate(zip(axes, signs)):
                 m[row, col] = sign
             if round(np.linalg.det(m)) == 1 and set(_centres_seen(m)) == {'D', 'L', 'B'}:
+                out.append(m)
+    return out
+
+
+def all_holds():
+    """All 24 ways a cube can be held (rotation matrices), the first being "as in view 1"."""
+    out = [np.eye(3, dtype=int)]
+    for axes in itertools.permutations(range(3)):
+        for signs in itertools.product((1, -1), repeat=3):
+            m = np.zeros((3, 3), int)
+            for row, (col, sign) in enumerate(zip(axes, signs)):
+                m[row, col] = sign
+            if round(np.linalg.det(m)) == 1 and not np.array_equal(m, out[0]):
                 out.append(m)
     return out
 
