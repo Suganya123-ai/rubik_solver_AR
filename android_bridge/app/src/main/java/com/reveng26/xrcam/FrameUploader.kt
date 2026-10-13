@@ -33,8 +33,9 @@ import javax.net.ssl.X509TrustManager
  *
  * The window follows the cube: the server says where the cube is in each
  * frame, and when it drifts toward the window's edge the window moves onto it.
- * While the cube is not found, the window searches -- hands are usually lower
- * than the middle of the view, so it starts a little below centre. One frame is in flight at a time: the next is sent when the server
+ * While the cube is not found the window stays still, where the cube last was,
+ * and after a few seconds returns to its usual place a little below the
+ * middle of the view (hands are usually lower than the middle). One frame is in flight at a time: the next is sent when the server
  * has answered, so a slow network never builds a queue.
  *
  * The server uses a certificate it made itself (browsers only allow cameras on
@@ -52,12 +53,10 @@ class FrameUploader(
         const val HEIGHT = 472          // the camera is 2048x1512
         private const val QUALITY = 70
         private const val REPLY_TIMEOUT_MS = 2500L
-        /** Where to look for the cube, in turn, while it is not found (centre of the window, 0..1 of the view). */
-        private val SEARCH = arrayOf(
-            floatArrayOf(0.50f, 0.58f), floatArrayOf(0.50f, 0.74f), floatArrayOf(0.32f, 0.66f),
-            floatArrayOf(0.68f, 0.66f), floatArrayOf(0.50f, 0.40f))
-        private const val SEARCH_AFTER_MS = 1500L    // no cube for this long: start looking elsewhere
-        private const val SEARCH_STEP_MS = 700L      // stay this long on each place
+        /** Where the window sits when there is no cube to follow: a little below the middle (hands are low). */
+        private const val HOME_X = 0.50f
+        private const val HOME_Y = 0.58f
+        private const val HOME_AFTER_MS = 4000L      // no cube for this long: go back there, once
         private const val EDGE = 0.22f               // the cube this far from the window's middle: re-centre on it
     }
 
@@ -70,15 +69,13 @@ class FrameUploader(
         set(value) { field = value.coerceIn(1, 3) }
 
     // Where the window is: its centre, as a fraction of the camera's view.
-    @Volatile private var windowX = SEARCH[0][0]
-    @Volatile private var windowY = SEARCH[0][1]
+    @Volatile private var windowX = HOME_X
+    @Volatile private var windowY = HOME_Y
     // The window as it was for the frame now with the server (to place the cube it reports).
     private var sentX = windowX
     private var sentY = windowY
     private var sentZoom = 2
     private var lastFound = 0L
-    private var searchStep = 0
-    private var searchMoved = 0L
     private val client: OkHttpClient
     private var socket: WebSocket? = null
     @Volatile private var running = false
@@ -158,7 +155,7 @@ class FrameUploader(
         }
     }
 
-    /** Keeps the window on the cube (from the server's reply), or moves on with the search. */
+    /** Keeps the window on the cube (from the server's reply). */
     private fun follow(reply: String) {
         val now = System.currentTimeMillis()
         try {
@@ -180,11 +177,12 @@ class FrameUploader(
                 return
             }
         } catch (_: Exception) { /* a reply that isn't a frame result */ }
-        if (zoom > 1 && now - lastFound > SEARCH_AFTER_MS && now - searchMoved > SEARCH_STEP_MS) {
-            searchStep = (searchStep + 1) % SEARCH.size
-            windowX = SEARCH[searchStep][0]
-            windowY = SEARCH[searchStep][1]
-            searchMoved = now
+        // Not found: stay where the cube last was (hands come back to the same place). Only after a
+        // while go back to the usual place, in one step. (An earlier version looked around the
+        // view for the cube, which made the picture jump from corner to corner.)
+        if (now - lastFound > HOME_AFTER_MS) {
+            windowX = HOME_X
+            windowY = HOME_Y
         }
     }
 

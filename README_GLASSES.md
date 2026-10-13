@@ -54,7 +54,7 @@ A wrong move is announced with the turn that undoes it.
 
 | Button | What it does |
 |---|---|
-| Zoom 2x | How much of the wide camera view is used: 2x, 3x, 1x. The window follows the cube and searches for it when it is lost. |
+| Zoom 2x | How much of the wide camera view is used: 2x, 3x, 1x. The window follows the cube; when the cube is lost it stays where it was, then returns to just below the middle. |
 | Glasses: floating / picture | What the glasses show: only the ghost cube and instructions (black is invisible on see-through glasses), or the camera picture with the arrows on the cube. |
 | Camera / Tutor | Show the raw camera picture on the phone instead of the tutor. |
 | Close | Stop. |
