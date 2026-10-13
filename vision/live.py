@@ -47,6 +47,16 @@ def process_frame(jpeg_bytes):
     hands_job = _hand_pool.submit(tracker.detect, frame) if tracker else None
     found = get_detector().detect(frame)
     hands = hands_job.result() if hands_job else []
+    return build_result(frame, found, hands, t0)
+
+
+def build_result(frame, found, hands, t0=None):
+    """The reply for one frame from what was found in it. `found` is (7x2
+    corner points, confidence) or None; `hands` as HandTracker.detect returns.
+    Split from process_frame so a device that finds the cube and the hands
+    itself (the phone app, vision/phone.py) reuses everything after that."""
+    t0 = time.perf_counter() if t0 is None else t0
+    h, w = frame.shape[:2]
     result = {'type': 'frame', 'width': w, 'height': h, 'keypoints': None, 'confidence': None, 'faces': None,
               'confident': False, 'hands': hands, 'covered': None}
     if found is not None:

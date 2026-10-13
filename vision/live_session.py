@@ -90,13 +90,20 @@ class LiveClient:
         if len(data) > MAX_FRAME_BYTES:
             raise ProtocolError(f'frame larger than {MAX_FRAME_BYTES // 1_000_000} MB')
         frame_id, jpeg = int.from_bytes(data[:4], 'big'), data[4:]
-        result = process_frame(jpeg)  # raises ValueError on a bad image
+        return self.handle_result(frame_id, process_frame(jpeg), jpeg)  # raises ValueError on a bad image
+
+    def handle_result(self, frame_id, result, jpeg=None):
+        """The rest of a frame once the cube and hands have been found in it
+        (vision.live.build_result): scan and move tracking. `jpeg` is only
+        for the recordings; the phone app passes none."""
         self.last_jpeg, self.last_keypoints = jpeg, result.get('keypoints')
         result['hands_busy'] = self.busy.update(result['hands'], result['keypoints'], time.monotonic())
         self._note(result)
         if self.scan is not None:
             result['scan'] = self.scan.feed(result)
-            if result['scan']['event'] in ('captured', 'done'):
+            if jpeg is None:
+                pass
+            elif result['scan']['event'] in ('captured', 'done'):
                 self._record_scan_view(jpeg, result)
             elif result['scan'].get('message') and result['scan'].get('refused'):
                 self._record_rejected_view(jpeg, result)
@@ -109,7 +116,7 @@ class LiveClient:
         if self.track is not None:
             # A sample of the frames where the cube wasn't found (one every 2 s): they show why
             # tracking stalls, and are what a detector trained for this camera needs.
-            if self.recorder and not result.get('confident') and time.monotonic() - self._miss_saved > 2.0:
+            if self.recorder and jpeg is not None and not result.get('confident') and time.monotonic() - self._miss_saved > 2.0:
                 self._miss_saved = time.monotonic()
                 self.recorder.write({'missed': True, 'confidence': result.get('confidence'),
                                      'hands': len(result.get('hands') or [])}, jpeg)
