@@ -32,6 +32,9 @@ class LocalServer(
     }
 
     private val viewers = CopyOnWriteArraySet<Viewer>()
+    // Sending happens on its own thread, in order: callers may be on the main thread, where
+    // Android forbids network use (closing the tutor crashed on that).
+    private val sender = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val pictureLock = Object()
     private var jpeg: ByteArray? = null
     private var jpegCount = 0
@@ -45,6 +48,10 @@ class LocalServer(
     val wantsPicture: Boolean get() = pictureViewers > 0
 
     fun broadcast(text: String) {
+        sender.execute { sendToAll(text) }
+    }
+
+    private fun sendToAll(text: String) {
         for (viewer in viewers) {
             try {
                 viewer.send(text)

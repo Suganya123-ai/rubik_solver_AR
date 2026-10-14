@@ -48,6 +48,8 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
 
     private var surface: Surface? = null
     private var uploader: TutorEngine? = null
+    private var closing = false
+    private var lastComeBack = 0L
     private var glassesScreen: GlassesScreen? = null
     private var frameCount = 0L
     private var lastFpsTime = 0L
@@ -152,6 +154,7 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
         cameraHelper.listener = this
 
         binding.btnClose.setOnClickListener {
+            closing = true
             uploader?.stop()
             cameraHelper.stopStream()
             finish()
@@ -204,6 +207,31 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
             } else {
                 binding.cameraStatusText.text = "Camera not found after ${maxRetries * 2}s."
             }
+        }
+    }
+
+    /**
+     * XREAL's app puts the phone into "controller mode" (its trackpad) when the glasses connect,
+     * which covers this screen: no tutor and no buttons on the phone. While the tutor runs, come
+     * back to the front (at most every few seconds, so this never fights XREAL's app in a loop).
+     */
+    override fun onStop() {
+        super.onStop()
+        if (!closing && !isFinishing && uploader != null) handler.postDelayed({ comeBack() }, 1500)
+    }
+
+    private fun comeBack() {
+        if (closing || isFinishing || isDestroyed || hasWindowFocus()) return
+        val now = System.currentTimeMillis()
+        if (now - lastComeBack < 4000) return
+        lastComeBack = now
+        Log.d(TAG, "covered by another app: coming back to the front")
+        val options = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY)
+        try {
+            startActivity(Intent(this, CameraActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK), options.toBundle())
+        } catch (e: Exception) {
+            Log.w(TAG, "could not come back to the front: ${e.message}")
         }
     }
 
