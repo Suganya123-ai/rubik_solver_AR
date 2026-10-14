@@ -20,6 +20,7 @@ MAX_MOVE = 0.03          # fraction of the cube's size per 1/15 s (more allowed 
 FRAME_GAP = 1 / 15          # fraction of the cube's size
 FLIP_GRACE_S = 3.0        # after view 1 is captured, give the user this long to flip before warning
 SAME_SIDE_DISTANCE = 27   # mean colour-feature distance below which two sides are the same side (renders: same <= 25, different >= 29)
+SAME_CENTRE_DISTANCE = 20 # ...and their centres must be this close too (red vs orange centres read ~30 apart)
 
 
 class ScanSession:
@@ -103,12 +104,17 @@ class ScanSession:
     def _side_seen_before(self, reading):
         """A correct turn shows three new sides. Returns the picture position
         ('U' top, 'F' left, 'R' right) of a view-2 side whose 8 outer stickers
-        match a view-1 side (turned any way), else None. Centres are left
-        out: a logo or glossy centre cap can make two different centres look alike."""
-        first = [_outer_ring(self.readings[1][f]) for f in 'UFR']
+        match a view-1 side (turned any way) AND whose centre matches that side's
+        centre, else None. The centre is needed: some scrambles leave two opposite
+        sides with the same 8 outer stickers (only the centres differ), and comparing
+        the rings alone refused a correct second view as "already scanned"."""
+        first = [(_outer_ring(self.readings[1][g]), np.array(color_feature(self.readings[1][g][4]))) for g in 'UFR']
         for f in 'UFR':
             ring = _outer_ring(reading[f])
-            for old in first:
+            centre = np.array(color_feature(reading[f][4]))
+            for old, old_centre in first:
+                if np.linalg.norm(centre - old_centre) >= SAME_CENTRE_DISTANCE:
+                    continue  # a different centre: a different side, however alike the rest looks
                 for turn in range(4):  # a quarter turn of a side moves its ring by 2
                     if np.mean(np.linalg.norm(ring - np.roll(old, 2 * turn, axis=0), axis=1)) < SAME_SIDE_DISTANCE:
                         return f

@@ -192,6 +192,19 @@ def test_view2_rejected_if_a_side_repeats_turned():
     assert not s._shares_a_side_with_view1(views[2])
 
 
+def test_view2_accepted_when_a_new_side_only_differs_from_an_old_one_by_its_centre():
+    # Seen on a real cube (14 Oct 2026): a scramble left opposite sides with the same outer
+    # stickers; the new side's centre (orange) differs from the old one's (red).
+    views = _views(_scrambled(15))
+    s = ScanSession()
+    for _ in range(STEADY_FRAMES):
+        _feed(s, _frame(views[1]))
+    lookalike = list(views[1]['F'])
+    lookalike[4] = (255, 140, 40) if views[1]['F'][4] != (255, 140, 40) else (200, 30, 40)
+    assert not s._shares_a_side_with_view1({'U': views[2]['U'], 'F': views[2]['F'], 'R': lookalike})
+    assert s._shares_a_side_with_view1({'U': views[2]['U'], 'F': views[2]['F'], 'R': views[1]['F']})
+
+
 LOGO = (235, 205, 205)  # a glossy logo cap on a red centre reads nearly white
 
 
