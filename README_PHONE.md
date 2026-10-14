@@ -9,8 +9,9 @@ glasses' camera ─► app on the Beam Pro: finds the cube ─► reads colours,
 glasses' screen ◄── tutor page, served by the app to itself ◄──┘
 ```
 
-**Status (14 Oct 2026): builds, not yet run on the Beam Pro.** The parts were
-checked on the laptop (below); the first run on the device is the next step.
+**Status (14 Oct 2026):** installed on the Beam Pro and every part runs there
+in the app's self-test (below), on a saved picture. **Not yet run with the
+glasses' camera**, which is the next step and the real measure of speed.
 
 ## What runs where
 
@@ -42,6 +43,23 @@ bridge app (plug in the glasses, OK the USB prompt, **Start the tutor**, OK
 again), without the address box. The status line on the phone shows the speed:
 `frames/s · cube in N of M · copy, find, tutor ms` (the time spent copying the
 picture, finding the cube, and in the tutor's Python code).
+
+## Checked on the Beam Pro (self-test, no glasses)
+
+`SelfTest.kt` runs each part on a saved frame from the glasses' camera:
+
+```
+adb shell "run-as com.cubetutor.phone sh -c 'cat > files/test.jpg'" < some_frame.jpg
+adb shell am start -S -n com.cubetutor.phone/com.reveng26.xrcam.MainActivity --ez selftest true
+adb logcat -s SelfTest
+```
+
+With the screen awake (a sleeping phone is 5-10 times slower): finding the cube
+**27 ms**, the tutor's Python code **7 ms**, so about **28 frames a second**
+before the camera and the screen take their share. The cube was found (0.93
+sure), the scan took its first view, the solver gave 21 moves, the page was
+served. Python takes 2-4 s to start. The phone's neural accelerator (NNAPI) was
+9 times slower than its processor for this model, so the processor is used.
 
 ## Checked on the laptop
 

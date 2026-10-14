@@ -10,7 +10,6 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
-import android.util.Log
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.nio.FloatBuffer
@@ -27,13 +26,16 @@ import java.nio.FloatBuffer
  * corners come out sharp. The whole frame is searched only when the cube is
  * not being followed.
  */
-class CubeFinder(context: Context) {
+class CubeFinder(
+    context: Context,
+    /** Another model file to try instead of the bundled one, and the picture size it was exported at (SelfTest). */
+    modelFile: java.io.File? = null,
+    private val SIZE: Int = 320,
+) {
 
     class Found(val points: FloatArray, val confidence: Float)   // 7 corners: x0, y0, x1, y1, ...
 
     companion object {
-        private const val TAG = "CubeFinder"
-        private const val SIZE = 320
         private const val KEEP = 0.5f      // keep following the cube while the model is at least this sure
         private const val MIN = 0.25f      // below this: nothing found
         private const val AROUND = 1.5f    // the square given to the model: this many times the cube's size
@@ -46,24 +48,24 @@ class CubeFinder(context: Context) {
     private val canvas = Canvas(square)
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val pixels = IntArray(SIZE * SIZE)
+    private val values = FloatArray(3 * SIZE * SIZE)
     private val input: FloatBuffer =
         ByteBuffer.allocateDirect(3 * SIZE * SIZE * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
     private var around: RectF? = null     // where the cube was, in the frame's pixels
     /** How long the model took on the last frame, in ms. */
     var lastMs = 0L
         private set
+    var prepareNs = 0L
+    var modelNs = 0L
+    var runs = 0
 
     init {
-        val model = context.assets.open("models/cube_pose_320.onnx").use { it.readBytes() }
-        val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+        val model = modelFile?.readBytes() ?: context.assets.open("models/cube_pose_320.onnx").use { it.readBytes() }
         val options = OrtSession.SessionOptions().apply {
-            setIntraOpNumThreads(threads)
+            // 4 threads on the processor: 26 ms a look on the Beam Pro. Its neural accelerator (NNAPI) was
+            // 9 times slower with this model, and more threads than big cores was slower too.
+            setIntraOpNumThreads(4)
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-            try {
-                addXnnpack(mapOf("intra_op_num_threads" to threads.toString()))   // faster CPU kernels, when available
-            } catch (e: Exception) {
-                Log.w(TAG, "XNNPACK not available, plain CPU: ${e.message}")
-            }
         }
         session = env.createSession(model, options)
         inputName = session.inputNames.first()
@@ -103,6 +105,7 @@ class CubeFinder(context: Context) {
         val scale = minOf(SIZE / box.width(), SIZE / box.height())
         val padX = (SIZE - box.width() * scale) / 2
         val padY = (SIZE - box.height() * scale) / 2
+        val t0 = System.nanoTime()
         canvas.drawColor(Color.rgb(114, 114, 114))
         // The part of the box that is inside the frame, and where it lands in the square.
         val src = Rect(maxOf(box.left, 0f).toInt(), maxOf(box.top, 0f).toInt(),
@@ -113,15 +116,21 @@ class CubeFinder(context: Context) {
         canvas.drawBitmap(frame, src, dst, paint)
         square.getPixels(pixels, 0, SIZE, 0, 0, SIZE, SIZE)
         val plane = SIZE * SIZE
-        for (i in 0 until plane) {
+        for (i in 0 until plane) {   // filled as a plain array, then copied in one go (much faster than one put per number)
             val p = pixels[i]
-            input.put(i, ((p shr 16) and 0xFF) / 255f)
-            input.put(plane + i, ((p shr 8) and 0xFF) / 255f)
-            input.put(2 * plane + i, (p and 0xFF) / 255f)
+            values[i] = ((p shr 16) and 0xFF) * (1f / 255f)
+            values[plane + i] = ((p shr 8) and 0xFF) * (1f / 255f)
+            values[2 * plane + i] = (p and 0xFF) * (1f / 255f)
         }
         input.rewind()
+        input.put(values)
+        input.rewind()
+        val t1 = System.nanoTime()
+        prepareNs += t1 - t0
+        runs++
         OnnxTensor.createTensor(env, input, longArrayOf(1, 3, SIZE.toLong(), SIZE.toLong())).use { tensor ->
             session.run(mapOf(inputName to tensor)).use { output ->
+                modelNs += System.nanoTime() - t1
                 // [1, 26, N]: for each of N candidates, 4 box numbers, how sure, then 7 x (x, y, visible).
                 val out = (output[0] as OnnxTensor).floatBuffer
                 val n = out.remaining() / 26

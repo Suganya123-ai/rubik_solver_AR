@@ -42,6 +42,7 @@ class MainActivity : AppCompatActivity(), GlassesConnection.Listener {
         setContentView(binding.root)
 
         binding.logText.movementMethod = ScrollingMovementMethod()
+        if (intent?.getBooleanExtra("selftest", false) == true) Thread { SelfTest.run(this) }.start()   // see SelfTest.kt
 
         glasses = GlassesConnection(this)
         glasses.listener = this

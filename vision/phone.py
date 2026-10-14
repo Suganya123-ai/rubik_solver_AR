@@ -89,3 +89,13 @@ def _as_bytes(pixels):
         return bytes(pixels)             # a Java byte[] (Chaquopy copies it in one go)
     except (TypeError, ValueError):      # signed bytes that bytes() refuses
         return np.asarray(pixels, np.int8).tobytes()
+
+
+def self_check():
+    """Solves a scrambled cube with whatever solver is in use (the app's self-test)."""
+    from cube.cube_state import solved_state
+    from cube.moves import apply_moves
+    scramble = "R U F' L2 D B R' U2 F D' L B2 U R2 F2".split()
+    t0 = time.perf_counter()
+    moves = _solver.solve(apply_moves(solved_state(), scramble))[0]
+    return f'{len(moves)} moves in {(time.perf_counter() - t0) * 1000:.0f} ms: {" ".join(moves)}'
