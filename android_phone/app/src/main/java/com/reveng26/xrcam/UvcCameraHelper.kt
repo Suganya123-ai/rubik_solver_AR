@@ -66,6 +66,8 @@ class UvcCameraHelper(private val context: Context) {
     private var videoControlInterface: UsbInterface? = null
     @Volatile
     private var isStreaming = false
+    /** Is a stream running (or starting)? A second one on the same camera made it send nothing. */
+    val streaming: Boolean get() = isStreaming
     private var streamThread: Thread? = null
 
     fun findCamera(type: GlassesConnection.CameraType): UsbDevice? {

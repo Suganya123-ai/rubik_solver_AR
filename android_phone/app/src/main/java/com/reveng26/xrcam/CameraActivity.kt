@@ -201,6 +201,9 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
 
     private fun tryFindCamera() {
         handler.post {
+            // Already streaming: this screen's camera view is rebuilt when XREAL's app moves the screen
+            // to another display and back, which asked again; a second stream stopped the picture.
+            if (cameraHelper.streaming || pendingDevice != null) return@post
             binding.cameraStatusText.text = "Searching for camera... (attempt ${retryCount + 1}/$maxRetries)"
             val device = cameraHelper.findCamera(cameraType)
             if (device != null) {
