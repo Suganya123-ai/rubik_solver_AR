@@ -84,6 +84,7 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
         get() = sharedStreamed
         set(value) { sharedStreamed = value }
     private var lastComeBack = 0L
+    private var askedAt = 0L   // when the camera's USB permission was last asked for
     private var glassesScreen: GlassesScreen? = null
     private var frameCount = 0L
     private var lastFpsTime = 0L
@@ -111,13 +112,15 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
             if (intent.action == ACTION_CAMERA_PERMISSION) {
                 val granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)
                 Log.d(TAG, "Camera USB permission: $granted")
+                askedAt = 0L
                 if (granted) {
                     pendingDevice?.let { dev ->
                         binding.cameraStatusText.text = "Permission granted, starting stream..."
                         cameraHelper.startStream(dev)
                     }
                 } else {
-                    binding.cameraStatusText.text = "Camera USB permission denied"
+                    binding.cameraStatusText.text = "Camera USB permission denied — asking again"
+                    handler.postDelayed({ if (!closing && !isDestroyed) tryFindCamera() }, 3000)
                 }
                 pendingDevice = null
             }
@@ -253,7 +256,17 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
                     cameraHelper.startStream(device)
                 } else {
                     binding.cameraStatusText.text = "Requesting camera permission..."
+                    Log.d(TAG, "asking for the camera's USB permission")
                     pendingDevice = device
+                    askedAt = System.currentTimeMillis()
+                    // No answer (the prompt got hidden or closed): ask again, which shows it again.
+                    handler.postDelayed({
+                        if (pendingDevice === device && !closing && !isDestroyed) {
+                            Log.d(TAG, "no answer to the USB prompt: asking again")
+                            pendingDevice = null
+                            tryFindCamera()
+                        }
+                    }, 15000)
                     val permIntent = Intent(ACTION_CAMERA_PERMISSION).apply { setPackage(packageName) }
                     val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
                     mgr.requestPermission(device, PendingIntent.getBroadcast(this, 1, permIntent, flags))
@@ -319,6 +332,9 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
 
     private fun comeBack() {
         if (closing || isFinishing || isDestroyed || (onPhone && hasWindowFocus())) return
+        // Android's USB prompt ("Allow ... to access XREAL One Pro?") is a screen of its own: coming
+        // back in front of it hid it, the user could never tap OK, and the camera never started.
+        if (pendingDevice != null || System.currentTimeMillis() - askedAt < 20000) return
         val now = System.currentTimeMillis()
         if (now - lastComeBack < 4000) return
         lastComeBack = now
