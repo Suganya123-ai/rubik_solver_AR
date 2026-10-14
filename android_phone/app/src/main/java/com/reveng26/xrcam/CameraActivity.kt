@@ -66,6 +66,7 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
         private var sharedDecoderHandler: Handler? = null
         private val main = Handler(Looper.getMainLooper())
         private var pendingStop: Runnable? = null
+        private var current: CameraActivity? = null   // the copy of this screen in charge of the camera
     }
 
     private lateinit var binding: ActivityCameraBinding
@@ -137,10 +138,12 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val server = intent.getStringExtra(EXTRA_SERVER).orEmpty()
         // A copy of this screen that was just closed by XREAL's app left everything running: take it over.
-        val adopted = pendingStop != null && sharedHelper != null
+        // (Also when the older copy is still open: XREAL's app opens the new copy first.)
+        val adopted = sharedHelper != null
         pendingStop?.let { main.removeCallbacks(it) }
         pendingStop = null
         if (adopted) Log.d(TAG, "taking over the running camera and tutor")
+        current = this
         TutorEngine.startServer(this)   // before the pages below ask it for anything
         binding.tutorView.apply {
             settings.javaScriptEnabled = true
@@ -333,6 +336,11 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
         binding.tutorView.destroy()
         surface?.release()
         try { unregisterReceiver(permissionReceiver) } catch (_: Exception) {}
+        if (current !== this && !closing) {
+            Log.d(TAG, "an older copy of the screen closed; the newer one keeps the camera")
+            return
+        }
+        current = null
         if (closing) {   // the user's Close, or a restart: stop now
             stopEverything()
             return
