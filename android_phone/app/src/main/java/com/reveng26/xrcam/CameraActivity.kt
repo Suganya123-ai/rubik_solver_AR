@@ -116,7 +116,7 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
                 if (granted) {
                     pendingDevice?.let { dev ->
                         binding.cameraStatusText.text = "Permission granted, starting stream..."
-                        cameraHelper.startStream(dev)
+                        sharedHelper?.startStream(dev)
                     }
                 } else {
                     binding.cameraStatusText.text = "Camera USB permission denied — asking again"
@@ -243,6 +243,8 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
 
     private fun tryFindCamera() {
         handler.post {
+            // This screen closed, or the camera was released meanwhile (a retry left over from before).
+            if (isDestroyed || closing || sharedHelper == null) return@post
             // Already streaming: this screen's camera view is rebuilt when XREAL's app moves the screen
             // to another display and back, which asked again; a second stream stopped the picture.
             if (cameraHelper.streaming || pendingDevice != null) return@post
