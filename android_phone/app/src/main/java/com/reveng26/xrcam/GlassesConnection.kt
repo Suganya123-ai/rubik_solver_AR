@@ -209,16 +209,6 @@ class GlassesConnection(private val context: Context) {
                     }
                 }
 
-                // Already on (e.g. left on by the last session, which may have stopped mid-stream and left
-                // the camera sending nothing): switch it off first, so it starts afresh.
-                if (curConfig != null && (curConfig.uvc0 == 1 || curConfig.uvc1 == 1)) {
-                    listener?.onLog("Camera already on: switching it off first")
-                    val off = UsbConfigList().apply { ncm = 1; ecm = 1; hid_ctrl = 1; enable = 1 }
-                    listener?.onLog("Off: ${glasses.NRBSPSetUsbConfigAll(off, null)}")
-                    Thread.sleep(2500)
-                    glasses.NRBSPWaitPilotReady(10000, null)
-                }
-
                 listener?.onLog("Calling NRBSPSetUsbConfigAll...")
                 val result = glasses.NRBSPSetUsbConfigAll(config, null)
                 listener?.onLog("Result: $result")

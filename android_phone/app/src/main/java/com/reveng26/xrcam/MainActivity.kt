@@ -104,7 +104,14 @@ class MainActivity : AppCompatActivity(), GlassesConnection.Listener {
     /** The tutor runs in this app: the page is served from the phone itself. */
     private fun serverAddress(): String = "127.0.0.1:${TutorEngine.PORT}"
 
+    private var lastLaunch = 0L
+
     private fun launchCamera() {
+        // Once at a time: the glasses can report "connected" twice in a row, and two switch-ons
+        // at once left the camera off.
+        val now = System.currentTimeMillis()
+        if (now - lastLaunch < 15000) return
+        lastLaunch = now
         onLog("Enabling Eye camera...")
         glasses.enableCamera(GlassesConnection.CameraType.GREYSCALE)
     }
