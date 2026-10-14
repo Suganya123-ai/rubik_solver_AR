@@ -136,7 +136,9 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
 
         // --- Cube Tutor bridge: show the tutor page on top and upload the camera picture to the laptop ---
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        val server = intent.getStringExtra(EXTRA_SERVER).orEmpty()
+        // The tutor runs on this phone. (A copy of this screen reopened by XREAL's app comes without
+        // the extras it was first opened with, so the address can't depend on them.)
+        val server = intent.getStringExtra(EXTRA_SERVER)?.takeIf { it.isNotEmpty() } ?: "127.0.0.1:${TutorEngine.PORT}"
         // A copy of this screen that was just closed by XREAL's app left everything running: take it over.
         // (Also when the older copy is still open: XREAL's app opens the new copy first.)
         val adopted = sharedHelper != null
