@@ -88,8 +88,22 @@
 
   function strokeArrow(ctx, pts, colour, width, glow) {
     ctx.save();
-    ctx.shadowColor = colour;
-    ctx.shadowBlur = glow;
+    if (window.lowPowerFps) {
+      // A blurred shadow is costly to draw on a busy device: a wide see-through stroke under the
+      // arrow gives much the same glow for a fraction of the work.
+      ctx.globalAlpha = 0.25;
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = width + glow * 0.8;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.shadowColor = colour;
+      ctx.shadowBlur = glow;
+    }
     ctx.strokeStyle = colour;
     ctx.lineWidth = width;
     ctx.lineCap = 'round';
@@ -110,6 +124,32 @@
     }
     ctx.restore();
   }
+
+  // "x1" / "x2" beside the arrow head: how many quarter turns the move is (R and R' are one, R2 two).
+  // Drawn upright in screen pixels, so it reads the right way even on a mirrored picture.
+  function turnLabel(ctx, pts, colour, width, turns) {
+    if (pts.length < 4) return;
+    const [x1, y1] = pts[pts.length - 1], [x0, y0] = pts[pts.length - 4];
+    const a = Math.atan2(y1 - y0, x1 - x0);
+    const gap = width * 5;
+    const m = ctx.getTransform();
+    const at = m.transformPoint(new DOMPoint(x1 + Math.cos(a) * gap, y1 + Math.sin(a) * gap));
+    const px = Math.max(12, width * 4.2) * Math.hypot(m.a, m.b);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.font = `800 ${Math.round(px)}px Inter, system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(3, px * 0.22);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+    ctx.strokeText(`x${turns}`, at.x, at.y);
+    ctx.fillStyle = colour;
+    ctx.fillText(`x${turns}`, at.x, at.y);
+    ctx.restore();
+  }
+
+  const quarterTurns = (m) => (Math.abs(m.angle) > Math.PI * 0.6 ? 2 : 1);
 
   const ARROW = '#3dff9a', UNDO = '#ff6a3d';  // green = do this, red-orange = undo (webcam app colours)
 
@@ -186,7 +226,7 @@
       this._drawn = now;
       const c = this.canvas;
       if (!this.state || !c.offsetParent) return;  // nothing to show, or hidden
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = Math.min(window.devicePixelRatio || 1, window.maxPixelRatio || 99);
       const w = Math.round(c.clientWidth * dpr), h = Math.round(c.clientHeight * dpr);
       if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
       this.w = w; this.h = h; this.size = Math.min(w, h);
@@ -280,6 +320,7 @@
     _arrow(ctx, m) {
       const pts = arcPoints(m, this._camera(), 2.05).map((p) => this._project(p));
       strokeArrow(ctx, pts, this.undo ? UNDO : ARROW, this.size * 0.022, this.size * 0.04);
+      turnLabel(ctx, pts, this.undo ? UNDO : ARROW, this.size * 0.022, quarterTurns(m));
     }
   }
 
@@ -380,6 +421,7 @@
     const t = ((opts.now || performance.now()) % 1400) / 1400;           // sweep, then show whole
     const shown = arc.slice(0, Math.max(3, Math.round(arc.length * Math.min(1, t * 1.6))));
     strokeArrow(ctx, shown, colour, Math.max(4, size * 0.03), size * 0.06);
+    turnLabel(ctx, arc, colour, Math.max(4, size * 0.03), quarterTurns(m));   // at the arrow's end, not the sweep's
   }
 
   if (typeof window !== 'undefined') { window.CubeHologram = CubeHologram; window.drawMoveOnVideo = drawMoveOnVideo; }

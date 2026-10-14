@@ -159,17 +159,21 @@ async function setupControls(withCameras = true): Promise<void> {
   await fill();
 }
 
+// On the Beam Pro the phone's screen is 3x finer than needed for these overlays: drawing them at
+// up to 1.5x is a fifth of the pixels and looks the same at arm's length.
+const MAX_PIXEL_RATIO = remoteCamera ? 1.5 : 99;
+
 function resize(): void {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
   canvas.width = Math.round(innerWidth * dpr);
   canvas.height = Math.round(innerHeight * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
 // Remote camera (the Beam Pro, which is also decoding the camera video and drawing up to three
-// copies of this page): redraw 15 times a second, not 60. The picture only changes a few
-// times a second anyway.
-const MIN_FRAME_MS = remoteCamera ? 66 : 0;
+// copies of this page): redraw 15 times a second in the glasses, not 60 (the picture only changes
+// about 10 times a second anyway), and 10 on the phone, which is only the remote control there.
+const MIN_FRAME_MS = remoteCamera ? (displayOnly ? 66 : 100) : 0;
 let lastDraw = 0;
 
 function frame(now: number): void {
@@ -210,7 +214,8 @@ async function boot(): Promise<void> {
   addEventListener('resize', resize);
   if (remoteCamera) {  // the frames come from the bridge app: no camera or hand tracking in this page
     document.body.classList.add('remote');
-    (window as unknown as { lowPowerFps: number }).lowPowerFps = 15;  // the ghost cube animates at this rate too
+    (window as unknown as { lowPowerFps: number }).lowPowerFps = displayOnly ? 15 : 10;  // the ghost cube animates at this rate too
+    (window as unknown as { maxPixelRatio: number }).maxPixelRatio = MAX_PIXEL_RATIO;
     cube.forgetMs = 2500;   // frames arrive a few times a second: keep the cube's overlays between them
     link.path = '/ws/view';
     setupControls(false);
