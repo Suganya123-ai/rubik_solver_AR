@@ -68,8 +68,9 @@ The vision server it talks to is the Python code in this repository
 3. **Check colours.** A cube net appears; highlighted stickers were unclear:
    tap one to fix its colour, or confirm (`Enter`). Then **Solve**.
 4. **Follow the moves.** Hold the cube corner-on, however you like: the app
-   follows it. Each move is a green arrow on your cube, played on the ghost
-   cube beside it (drawn as you see it), and written from where you sit:
+   follows it. Each move is a green arrow on your cube, marked **x1** (a
+   quarter turn) or **x2** (a half turn), and played on the ghost cube in the
+   top-right corner (drawn as you see it). It is written from where you sit:
    "Turn the green side (facing you): its top edge moves to your left". Do
    it and hold still for about half a second: ✓, a beep and the next move.
 5. **Wrong move.** The hand mesh turns red, the ghost cube shows ⚠, and
@@ -98,9 +99,12 @@ decided. They are never committed (see `.gitignore`). `RUBIK_RECORD=0
 
 ## Status
 
-- Working end to end with a simulated camera (scan, a wrong move, its undo,
-  solved) and 95 automated tests (`python -m pytest -q`).
-- Still being tuned on real cubes and lighting.
+- Working end to end on a real cube and webcam (14 Oct 2026), with a
+  simulated camera (scan, a wrong move, its undo, solved) and 96 automated
+  tests (`python -m pytest -q`).
+- 14 Oct 2026: a correct second scan view is no longer refused as "already
+  scanned" when two sides share the same outer stickers (the centres now
+  count too); the ghost cube stays in the top-right corner; arrows show x1/x2.
 - Not done yet from the concept video: HUD labels with leader lines, the
   picture-in-picture inset, a Three.js ghost cube (the current one is the
   demo's canvas renderer).
