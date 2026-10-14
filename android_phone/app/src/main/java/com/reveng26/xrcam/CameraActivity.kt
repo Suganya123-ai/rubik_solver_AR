@@ -34,6 +34,9 @@ import java.util.concurrent.ConcurrentLinkedQueue
 class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
 
     companion object {
+        private var lastRestart = 0L
+        private var restarts = 0   // automatic restarts in a row without a picture
+
         /** Launch options that put an activity on the phone's own screen (display 0). */
         fun onPhoneScreen(): Bundle =
             android.app.ActivityOptions.makeBasic().setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY).toBundle()
@@ -53,6 +56,7 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
     private var surface: Surface? = null
     private var uploader: TutorEngine? = null
     private var closing = false
+    private var streamed = false   // the camera has streamed at least once in this screen
     private var lastComeBack = 0L
     private var glassesScreen: GlassesScreen? = null
     private var frameCount = 0L
@@ -202,6 +206,7 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
             if (device != null) {
                 val mgr = usbManager!!
                 if (mgr.hasPermission(device)) {
+                    streamed = true
                     binding.cameraStatusText.text = "Camera found! Starting stream..."
                     cameraHelper.startStream(device)
                 } else {
@@ -211,11 +216,14 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
                     val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
                     mgr.requestPermission(device, PendingIntent.getBroadcast(this, 1, permIntent, flags))
                 }
-            } else if (retryCount < maxRetries) {
+            } else if (retryCount < (if (streamed) 3 else maxRetries)) {
                 retryCount++
                 handler.postDelayed({ tryFindCamera() }, 2000)
             } else {
-                binding.cameraStatusText.text = "Camera not found after ${maxRetries * 2}s."
+                // The glasses reset their USB link now and then (about every 20 minutes in one session)
+                // and come back with the camera switched off. Switch it on again: start over.
+                binding.cameraStatusText.text = "Camera gone — switching it on again…"
+                restartTutor("camera not found")
             }
         }
     }
@@ -228,6 +236,31 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
     override fun onStop() {
         super.onStop()
         if (!closing && !isFinishing && uploader != null) handler.postDelayed({ comeBack() }, 1500)
+    }
+
+    /** Back to the start screen, which switches the glasses' camera on and opens the tutor again. */
+    private fun restartTutor(reason: String) {
+        if (closing || isFinishing) return
+        val now = System.currentTimeMillis()
+        if (now - lastRestart < 15000) {   // not in a loop: try again a bit later
+            handler.postDelayed({ retryCount = 0; tryFindCamera() }, 5000)
+            return
+        }
+        if (restarts >= 3) {   // switching the camera off and on didn't help: only a replug resets it
+            Log.w(TAG, "camera still not working after $restarts restarts: asking for a replug")
+            binding.cameraStatusText.text = "The glasses' camera is stuck. Unplug the glasses, wait 5 seconds, plug them back in."
+            binding.uploadStatusText.text = binding.cameraStatusText.text
+            return
+        }
+        restarts++
+        lastRestart = now
+        Log.w(TAG, "restarting the tutor: $reason")
+        closing = true
+        startActivity(Intent(this, MainActivity::class.java)
+            .putExtra("autostart", true)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            onPhoneScreen())
+        finish()
     }
 
     override fun onResume() {
@@ -413,13 +446,18 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
     }
 
     override fun onError(message: String) {
-        handler.post { binding.cameraStatusText.text = "Error: $message" }
+        handler.post {
+            binding.cameraStatusText.text = "Error: $message"
+            if (message.startsWith("No data")) restartTutor("camera sends nothing")
+        }
     }
 
     override fun onLog(message: String) {
         handler.post {
             Log.d(TAG, message)
             binding.cameraStatusText.text = message
+            // The camera is open but sends nothing (10 s): switch it off and on again.
+            if (message.startsWith("20 timeouts")) restartTutor("camera sends nothing")
         }
     }
 
@@ -428,6 +466,7 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
      * NAL parsing happens here (fast), decoding is queued to the decoder thread.
      */
     override fun onFrameReceived(width: Int, height: Int, data: ByteArray) {
+        restarts = 0   // the camera works: automatic restarts may be used again later
         frameCount++
         fpsFrameCount++
 
@@ -470,17 +509,14 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
             when (nalType) {
                 32 -> { // VPS
                     vpsNal = nal.copyOf()
-                    Log.d(TAG, "Captured VPS: ${nal.size} bytes")
                     if (!decoderReady) initDecoder()
                 }
                 33 -> { // SPS
                     spsNal = nal.copyOf()
-                    Log.d(TAG, "Captured SPS: ${nal.size} bytes")
                     if (!decoderReady) initDecoder()
                 }
                 34 -> { // PPS
                     ppsNal = nal.copyOf()
-                    Log.d(TAG, "Captured PPS: ${nal.size} bytes")
                     if (!decoderReady) initDecoder()
                 }
                 19, 20 -> { // IDR_W_RADL, IDR_N_LP (keyframes)

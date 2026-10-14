@@ -70,6 +70,15 @@ class MainActivity : AppCompatActivity(), GlassesConnection.Listener {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("autostart", false) && binding.btnStartCamera.isEnabled) {
+            intent.removeExtra("autostart")
+            launchCamera()
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         glasses.start()
@@ -107,7 +116,9 @@ class MainActivity : AppCompatActivity(), GlassesConnection.Listener {
             binding.statusText.text = "Connected: $deviceName"
             binding.statusText.setTextColor(0xFF00E676.toInt())
             binding.btnStartCamera.isEnabled = true
-            // For testing from a computer (adb taps don't reach the app while the glasses are in use):
+            // "autostart": the tutor screen asks for this when the glasses' camera went away (it switches
+            // the camera on again). Also handy from a computer, where taps don't reach the app while
+            // the glasses are in use:
             // adb shell am start -n com.cubetutor.phone/com.reveng26.xrcam.MainActivity --ez autostart true
             if (intent?.getBooleanExtra("autostart", false) == true) {
                 intent.removeExtra("autostart")
@@ -156,6 +167,7 @@ class MainActivity : AppCompatActivity(), GlassesConnection.Listener {
         val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
             .format(java.util.Date())
         binding.logText.append("[$time] $msg\n")
+        android.util.Log.i("MainActivity", msg)
 
         // Auto-scroll to bottom
         val scrollAmount = binding.logText.layout?.let {

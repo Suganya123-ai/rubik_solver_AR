@@ -61,12 +61,21 @@ class CubeFinder(
 
     init {
         val model = modelFile?.readBytes() ?: context.assets.open("models/cube_pose_320.onnx").use { it.readBytes() }
+        // Tuning, without rebuilding: files/finder.txt may hold e.g. "threads=2 spin=0" (SelfTest / adb).
+        val tuning = try {
+            java.io.File(context.filesDir, "finder.txt").readText().split(Regex("\\s+")).filter { "=" in it }
+                .associate { it.substringBefore("=") to it.substringAfter("=") }
+        } catch (_: Exception) { emptyMap() }
         val options = OrtSession.SessionOptions().apply {
-            // 4 threads on the processor: 26 ms a look on the Beam Pro. Its neural accelerator (NNAPI) was
-            // 9 times slower with this model, and more threads than big cores was slower too.
-            setIntraOpNumThreads(4)
+            // 4 threads on the processor: 26 ms a look on the Beam Pro on its own. Its neural accelerator
+            // (NNAPI) was 9 times slower with this model, and more threads than big cores was slower too.
+            setIntraOpNumThreads(tuning["threads"]?.toIntOrNull() ?: 4)
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+            // Threads that wait by spinning keep a core busy; with the glasses' own software and the
+            // camera decoder also running, letting them sleep leaves those cores to the others.
+            addConfigEntry("session.intra_op.allow_spinning", tuning["spin"] ?: "1")
         }
+        android.util.Log.i("CubeFinder", "threads=${tuning["threads"] ?: 4} spin=${tuning["spin"] ?: "1"}")
         session = env.createSession(model, options)
         inputName = session.inputNames.first()
     }
