@@ -34,6 +34,10 @@ import java.util.concurrent.ConcurrentLinkedQueue
 class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
 
     companion object {
+        /** Launch options that put an activity on the phone's own screen (display 0). */
+        fun onPhoneScreen(): Bundle =
+            android.app.ActivityOptions.makeBasic().setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY).toBundle()
+
         const val EXTRA_CAMERA_TYPE = "camera_type"
         const val EXTRA_SERVER = "server"
         private const val TAG = "CameraActivity"
@@ -103,6 +107,7 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
         // --- Cube Tutor bridge: show the tutor page on top and upload the camera picture to the laptop ---
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val server = intent.getStringExtra(EXTRA_SERVER).orEmpty()
+        TutorEngine.startServer(this)   // before the pages below ask it for anything
         binding.tutorView.apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -112,6 +117,11 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
                 // The laptop's certificate is one it made itself; accept it for this page.
                 override fun onReceivedSslError(view: android.webkit.WebView, handler: android.webkit.SslErrorHandler,
                                                 error: android.net.http.SslError) = handler.proceed()
+                // The page server starts with the tutor; if the page asked before it was up, ask again.
+                override fun onReceivedError(view: android.webkit.WebView, request: android.webkit.WebResourceRequest,
+                                             error: android.webkit.WebResourceError) {
+                    if (request.isForMainFrame) view.postDelayed({ view.reload() }, 1000)
+                }
             }
             if (server.isNotEmpty()) loadUrl("http://$server/glasses/?camera=remote")
         }
@@ -220,16 +230,27 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
         if (!closing && !isFinishing && uploader != null) handler.postDelayed({ comeBack() }, 1500)
     }
 
+    override fun onResume() {
+        super.onResume()
+        // XREAL's app can move this screen onto its own virtual screen inside the glasses: bring it back.
+        if ((display?.displayId ?: android.view.Display.DEFAULT_DISPLAY) != android.view.Display.DEFAULT_DISPLAY) {
+            Log.d(TAG, "opened on display ${display?.displayId}, not the phone's: moving to the phone's screen")
+            handler.postDelayed({ comeBack() }, 300)
+        }
+    }
+
+    private val onPhone: Boolean
+        get() = (display?.displayId ?: android.view.Display.DEFAULT_DISPLAY) == android.view.Display.DEFAULT_DISPLAY
+
     private fun comeBack() {
-        if (closing || isFinishing || isDestroyed || hasWindowFocus()) return
+        if (closing || isFinishing || isDestroyed || (onPhone && hasWindowFocus())) return
         val now = System.currentTimeMillis()
         if (now - lastComeBack < 4000) return
         lastComeBack = now
         Log.d(TAG, "covered by another app: coming back to the front")
-        val options = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY)
         try {
             startActivity(Intent(this, CameraActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK), options.toBundle())
+                .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_NEW_TASK), onPhoneScreen())
         } catch (e: Exception) {
             Log.w(TAG, "could not come back to the front: ${e.message}")
         }

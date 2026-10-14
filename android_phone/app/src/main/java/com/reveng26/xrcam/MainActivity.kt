@@ -144,8 +144,11 @@ class MainActivity : AppCompatActivity(), GlassesConnection.Listener {
             val intent = Intent(this, CameraActivity::class.java).apply {
                 putExtra(CameraActivity.EXTRA_CAMERA_TYPE, cameraType.name)
                 putExtra(CameraActivity.EXTRA_SERVER, serverAddress())
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            startActivity(intent)
+            // On the phone's own screen: XREAL's app otherwise opens it on its virtual screen inside
+            // the glasses, and the phone shows only XREAL's trackpad (no tutor, no buttons).
+            startActivity(intent, CameraActivity.onPhoneScreen())
         }
     }
 

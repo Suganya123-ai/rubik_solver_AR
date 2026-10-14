@@ -119,6 +119,10 @@ class GlassesScreen(private val context: Context, private val server: String) {
             webViewClient = object : WebViewClient() {
                 // The laptop's certificate is one it made itself; accept it for this page.
                 override fun onReceivedSslError(v: WebView, handler: SslErrorHandler, error: SslError) = handler.proceed()
+                override fun onReceivedError(v: WebView, request: android.webkit.WebResourceRequest,
+                                             error: android.webkit.WebResourceError) {
+                    if (request.isForMainFrame) v.postDelayed({ v.reload() }, 1000)   // server not up yet: ask again
+                }
             }
         }
 

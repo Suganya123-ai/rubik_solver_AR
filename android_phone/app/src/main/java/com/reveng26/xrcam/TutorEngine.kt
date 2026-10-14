@@ -45,6 +45,8 @@ class TutorEngine(
          * One page server for the whole app, started once and kept: a second tutor screen opened
          * while the last one was still closing used to crash on the port being taken.
          */
+        fun startServer(context: Context) { server(context) }
+
         @Synchronized private fun server(context: Context): LocalServer = shared ?: LocalServer(context.applicationContext, PORT) { text ->
             active?.command(text)
         }.also {
