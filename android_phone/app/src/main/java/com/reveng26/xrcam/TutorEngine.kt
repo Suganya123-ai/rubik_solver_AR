@@ -2,15 +2,11 @@ package com.reveng26.xrcam
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Rect
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.util.Log
-import android.view.PixelCopy
-import android.view.Surface
-import android.view.TextureView
+import android.media.Image
 import com.chaquo.python.PyObject
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
@@ -21,7 +17,7 @@ import java.nio.ByteBuffer
  * The whole tutor on the phone: no laptop, no network.
  *
  * For each camera frame, on its own thread:
- *   1. a window of the glasses' wide camera picture is copied out (640x472),
+ *   1. a window of the glasses' wide camera picture is cut out (640x472),
  *   2. the cube finder (CubeFinder, ONNX Runtime) gives the 7 corner points,
  *   3. the tutor's Python code (vision/phone.py, through Chaquopy) reads the
  *      colours and runs the scan / the move tracking,
@@ -36,18 +32,28 @@ import java.nio.ByteBuffer
  */
 class TutorEngine(
     private val context: Context,
-    private val picture: TextureView,
-    /** The surface the decoder draws into (the picture at full size). */
-    private val surface: () -> Surface?,
     private val onStatus: (String) -> Unit,
 ) {
     companion object {
         private const val TAG = "TutorEngine"
+
+        /** The engine that is running now (at most one): the page's commands go to it. */
+        @Volatile private var active: TutorEngine? = null
+        private var shared: LocalServer? = null
+
+        /**
+         * One page server for the whole app, started once and kept: a second tutor screen opened
+         * while the last one was still closing used to crash on the port being taken.
+         */
+        @Synchronized private fun server(context: Context): LocalServer = shared ?: LocalServer(context.applicationContext, PORT) { text ->
+            active?.command(text)
+        }.also {
+            it.start(0, true)   // 0: connections never time out (the page's link is quiet between commands)
+            shared = it
+        }
         const val PORT = 5273
         const val WIDTH = 640
         const val HEIGHT = 472          // the camera is 2048x1512
-        private const val VIDEO_WIDTH = 2048
-        private const val VIDEO_HEIGHT = 1512
         private const val QUALITY = 60
         private const val HOME_X = 0.50f
         private const val HOME_Y = 0.58f
@@ -60,8 +66,12 @@ class TutorEngine(
     private val work = Handler(thread.looper)
     private val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
     private val bytes = ByteArray(WIDTH * HEIGHT * 4)
-    private var full: Bitmap? = null
-    @Volatile private var fastCopy = true
+    private val argb = IntArray(WIDTH * HEIGHT)
+    private val columns = IntArray(WIDTH)
+    private var yPlane = ByteArray(0)
+    private var uPlane = ByteArray(0)
+    private var vPlane = ByteArray(0)
+    private var lastSaved = 0L
     @Volatile private var running = false
 
     /** 1 = the whole view; 2 = the middle half, twice as large; 3 = the middle third. */
@@ -77,9 +87,9 @@ class TutorEngine(
     private var finder: CubeFinder? = null
     private var session: PyObject? = null
     private val pythonLock = Any()   // one frame or command in the Python code at a time
-    val server = LocalServer(context, PORT) { text ->
-        synchronized(pythonLock) { session?.callAttr("command", text)?.toString() }
-    }
+    private val server = server(context)
+
+    private fun command(text: String): String? = synchronized(pythonLock) { session?.callAttr("command", text)?.toString() }
 
     // What is reported on the phone's status line.
     private var frames = 0
@@ -91,7 +101,7 @@ class TutorEngine(
 
     fun start() {
         running = true
-        server.start(0, true)   // 0: connections never time out (the page's link is quiet between commands)
+        active = this
         onStatus("Starting the tutor…")
         work.post {
             try {
@@ -111,77 +121,90 @@ class TutorEngine(
         running = false
         main.removeCallbacksAndMessages(null)
         work.removeCallbacksAndMessages(null)
-        server.stop()
+        if (active === this) active = null
+        server.feeding = false
         work.post {
             finder?.close()
             thread.quitSafely()
         }
     }
 
-    /** Takes the next picture, then [process] runs on the tutor thread. */
+    @Volatile private var wantPicture = false
+
+    /** Ready for the next picture: [offer] fills it in from the decoder. */
     private fun next() {
         if (!running) return
-        val started = System.nanoTime()
-        val source = surface()
-        val z = zoom
-        sentZoom = z
-        if (source == null || !source.isValid || !picture.isAvailable) {   // the decoder hasn't drawn anything yet
-            server.feeding = false
-            work.postDelayed({ next() }, 200)
-            return
-        }
-        if (!fastCopy) {
-            main.post {   // reading through the view has to happen on the main thread
-                if (!running) return@post
-                grabSlow(z)
-                work.post { process(started) }
-            }
-            return
-        }
-        // Only the window is copied out of the decoder's full-size picture, already shrunk to the
-        // size that is used: the graphics chip does it.
-        val w = VIDEO_WIDTH / z
-        val h = VIDEO_HEIGHT / z
-        val x = (windowX * VIDEO_WIDTH - w / 2f).toInt().coerceIn(0, VIDEO_WIDTH - w)   // keep the window inside the picture
-        val y = (windowY * VIDEO_HEIGHT - h / 2f).toInt().coerceIn(0, VIDEO_HEIGHT - h)
-        sentX = (x + w / 2f) / VIDEO_WIDTH
-        sentY = (y + h / 2f) / VIDEO_HEIGHT
-        try {
-            PixelCopy.request(source, Rect(x, y, x + w, y + h), bitmap, { result ->
-                if (result == PixelCopy.SUCCESS) {
-                    process(started)
-                } else {  // not supported for this surface: read through the view from now on
-                    Log.w(TAG, "fast copy failed ($result), using the slow way")
-                    fastCopy = false
-                    next()
-                }
-            }, work)
-        } catch (e: Exception) {
-            Log.w(TAG, "fast copy refused, using the slow way", e)
-            fastCopy = false
-            work.post { next() }
-        }
+        wantPicture = true
+        work.postDelayed(noPicture, 1500)
     }
 
-    /** The window read through the view: the picture z times larger, then its window cut out. */
-    private fun grabSlow(z: Int) {
-        if (z == 1) {
-            picture.getBitmap(bitmap)
-            sentX = 0.5f; sentY = 0.5f
-            return
+    private val noPicture = Runnable { if (wantPicture) server.feeding = false }
+
+    /**
+     * A decoded camera picture (full size, YUV), from the decoder's thread. Taken only when the
+     * tutor is ready for one (the others are skipped, so it never falls behind); the window is cut
+     * out right here, and the rest runs on the tutor's thread. The picture comes straight from the
+     * decoder, not from a view on the screen: XREAL's own app covers this app's screen while the
+     * glasses are in use, and a covered view stops updating.
+     */
+    fun offer(image: Image) {
+        if (!running || !wantPicture) return
+        wantPicture = false
+        work.removeCallbacks(noPicture)
+        val started = System.nanoTime()
+        cutWindow(image)
+        work.post { process(started) }
+    }
+
+    /**
+     * Cuts the window out of the decoder's full-size picture into [bitmap] (640x472), converting
+     * from the decoder's YUV (BT.601, full range: what the glasses' camera sends) to RGB.
+     */
+    private fun cutWindow(image: Image) {
+        val z = zoom
+        sentZoom = z
+        val iw = image.width
+        val ih = image.height
+        val w = iw / z
+        val h = ih / z
+        val x = (windowX * iw - w / 2f).toInt().coerceIn(0, iw - w)   // keep the window inside the picture
+        val y = (windowY * ih - h / 2f).toInt().coerceIn(0, ih - h)
+        sentX = (x + w / 2f) / iw
+        sentY = (y + h / 2f) / ih
+        val planes = image.planes
+        yPlane = copy(planes[0].buffer, yPlane)
+        uPlane = copy(planes[1].buffer, uPlane)
+        vPlane = copy(planes[2].buffer, vPlane)
+        val yRow = planes[0].rowStride
+        val yStep = planes[0].pixelStride
+        val uvRow = planes[1].rowStride
+        val uvStep = planes[1].pixelStride
+        for (ox in 0 until WIDTH) columns[ox] = x + ox * w / WIDTH
+        var i = 0
+        for (oy in 0 until HEIGHT) {
+            val sy = y + oy * h / HEIGHT
+            val yLine = sy * yRow
+            val uvLine = (sy shr 1) * uvRow
+            for (ox in 0 until WIDTH) {
+                val sx = columns[ox]
+                val luma = yPlane[yLine + sx * yStep].toInt() and 0xFF
+                val uv = uvLine + (sx shr 1) * uvStep
+                val u = (uPlane[uv].toInt() and 0xFF) - 128
+                val v = (vPlane[uv].toInt() and 0xFF) - 128
+                val r = (luma + ((359 * v) shr 8)).coerceIn(0, 255)
+                val g = (luma - ((88 * u + 183 * v) shr 8)).coerceIn(0, 255)
+                val b = (luma + ((454 * u) shr 8)).coerceIn(0, 255)
+                argb[i++] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+            }
         }
-        var big = full
-        if (big == null || big.width != WIDTH * z) {
-            big?.recycle()
-            big = Bitmap.createBitmap(WIDTH * z, HEIGHT * z, Bitmap.Config.ARGB_8888)
-            full = big
-        }
-        picture.getBitmap(big)
-        val x = (windowX * big.width - WIDTH / 2f).toInt().coerceIn(0, big.width - WIDTH)
-        val y = (windowY * big.height - HEIGHT / 2f).toInt().coerceIn(0, big.height - HEIGHT)
-        Canvas(bitmap).drawBitmap(big, Rect(x, y, x + WIDTH, y + HEIGHT), Rect(0, 0, WIDTH, HEIGHT), null)
-        sentX = (x + WIDTH / 2f) / big.width
-        sentY = (y + HEIGHT / 2f) / big.height
+        bitmap.setPixels(argb, 0, WIDTH, 0, 0, WIDTH, HEIGHT)
+    }
+
+    private fun copy(buffer: java.nio.ByteBuffer, into: ByteArray): ByteArray {
+        buffer.rewind()
+        val out = if (into.size >= buffer.remaining()) into else ByteArray(buffer.remaining())
+        buffer.get(out, 0, buffer.remaining())
+        return out
     }
 
     private fun process(started: Long) {
@@ -203,6 +226,10 @@ class TutorEngine(
                 server.picture(out.toByteArray())
             }
             follow(found)
+            if (System.currentTimeMillis() - lastSaved > 3000) {   // the latest picture, for checking (adb: run-as ... cat files/last.jpg)
+                lastSaved = System.currentTimeMillis()
+                java.io.File(context.filesDir, "last.jpg").outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 80, it) }
+            }
             frames++
             if (found != null) foundFrames++
             copyMs += (copied - started) / 1_000_000
@@ -212,7 +239,8 @@ class TutorEngine(
             if (now - since >= 2000) {
                 val status = "%.0f frames/s · cube in %d of %d · copy %d, find %d, tutor %d ms".format(
                     frames * 1000.0 / (now - since), foundFrames, frames, copyMs / frames, findMs / frames, pythonMs / frames)
-                Log.i(TAG, status)
+                val group = try { java.io.File("/proc/self/cpuset").readText().trim() } catch (_: Exception) { "?" }
+                Log.i(TAG, "$status · $group")
                 onStatus(status)
                 since = now; frames = 0; foundFrames = 0; copyMs = 0; findMs = 0; pythonMs = 0
             }

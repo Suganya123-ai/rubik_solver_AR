@@ -42,6 +42,11 @@ class MainActivity : AppCompatActivity(), GlassesConnection.Listener {
         setContentView(binding.root)
 
         binding.logText.movementMethod = ScrollingMovementMethod()
+        // Android 14 gives a USB camera (the glasses' camera) only to apps that hold the camera
+        // permission; without it the USB prompt is refused straight away ("USB permission denied").
+        if (checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.CAMERA), 1)
+        }
         if (intent?.getBooleanExtra("selftest", false) == true) Thread { SelfTest.run(this) }.start()   // see SelfTest.kt
 
         glasses = GlassesConnection(this)
@@ -102,6 +107,12 @@ class MainActivity : AppCompatActivity(), GlassesConnection.Listener {
             binding.statusText.text = "Connected: $deviceName"
             binding.statusText.setTextColor(0xFF00E676.toInt())
             binding.btnStartCamera.isEnabled = true
+            // For testing from a computer (adb taps don't reach the app while the glasses are in use):
+            // adb shell am start -n com.cubetutor.phone/com.reveng26.xrcam.MainActivity --ez autostart true
+            if (intent?.getBooleanExtra("autostart", false) == true) {
+                intent.removeExtra("autostart")
+                launchCamera()
+            }
         }
     }
 

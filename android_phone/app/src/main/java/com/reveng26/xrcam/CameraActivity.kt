@@ -9,6 +9,7 @@ import android.graphics.SurfaceTexture
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
 import android.media.MediaCodec
+import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.Build
 import android.os.Bundle
@@ -118,7 +119,8 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
             binding.btnToggleView.text = if (showTutor) "Camera" else "Tutor"
         }
         if (server.isNotEmpty()) {
-            uploader = TutorEngine(this, binding.cameraPreview, { surface }) { status ->
+            startForegroundService(Intent(this, TutorService::class.java))   // all processor cores (see TutorService)
+            uploader = TutorEngine(this) { status ->
                 handler.post { binding.uploadStatusText.text = status }
             }.also { it.start() }
             binding.btnZoom.setOnClickListener {  // how much of the wide camera view is sent: 2x -> 3x -> 1x
@@ -207,6 +209,7 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
 
     override fun onDestroy() {
         super.onDestroy()
+        stopService(Intent(this, TutorService::class.java))
         uploader?.stop()
         uploader = null
         glassesScreen?.stop()
@@ -224,7 +227,6 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
     // --- H.265/HEVC Decoder ---
 
     private fun initDecoder() {
-        if (surface == null) return
         if (vpsNal == null || spsNal == null || ppsNal == null) {
             Log.d(TAG, "Cannot init decoder: need VPS+SPS+PPS (have VPS=${vpsNal != null} SPS=${spsNal != null} PPS=${ppsNal != null})")
             return
@@ -243,7 +245,11 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
             Log.d(TAG, "HEVC csd-0: VPS=${vpsNal!!.size}b + SPS=${spsNal!!.size}b + PPS=${ppsNal!!.size}b = ${csd0.size()}b")
 
             val codec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_HEVC)
-            codec.configure(format, surface, null, 0)
+            // Decoded into memory (not onto the screen): the tutor reads each picture itself, and gets it
+            // even while XREAL's app covers this screen (a covered view stops updating). Drawing into
+            // an ImageReader instead gave pictures in the decoder's own compressed layout, unreadable.
+            format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
+            codec.configure(format, null, null, 0)
             codec.start()
             decoder = codec
             decoderReady = true
@@ -306,7 +312,12 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
             while (true) {
                 val outIndex = codec.dequeueOutputBuffer(info, 0)
                 if (outIndex >= 0) {
-                    codec.releaseOutputBuffer(outIndex, true)
+                    try {
+                        codec.getOutputImage(outIndex)?.let { image -> uploader?.offer(image) }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "could not read a decoded picture: ${e.message}")
+                    }
+                    codec.releaseOutputBuffer(outIndex, false)
                 } else if (outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     val newFormat = codec.outputFormat
                     Log.d(TAG, "Decoder output format: $newFormat")
