@@ -33,7 +33,6 @@ const ghost = new window.CubeHologram(document.getElementById('ghost-canvas') as
 // Seen from the user's side: the webcam looks at the cube from the other side,
 // so the ghost is turned round (green facing the user is in front) and not mirrored.
 ghost.homeYaw = ghost.yaw = -0.68 + Math.PI;
-let ghostPos: [number, number, number] | null = null;
 
 const HINT_AFTER_MS = 800; // no confident cube for this long: show the "hold it steady" hint
 let lastConfident = -Infinity;
@@ -57,26 +56,13 @@ function updateGhost(): void {
 }
 
 /** The ghost cube floats beside the real cube (the roomier side), gliding as it moves. */
-function placeGhost(corners: [number, number][] | null): void {
+function placeGhost(_corners: [number, number][] | null): void {
+  // Fixed in the top-right corner (below the "turning" badge), not following the cube.
   if (ghostBox.hidden) return;
-  let x: number, y: number, size: number;
-  if (corners) {
-    const xs = corners.map((p) => p[0]), ys = corners.map((p) => p[1]);
-    const left = Math.min(...xs), right = Math.max(...xs), top = Math.min(...ys), bottom = Math.max(...ys);
-    const gap = Math.max(24, (right - left) * 0.15);
-    const roomRight = innerWidth - 16 - (right + gap), roomLeft = left - gap - 16;
-    size = Math.max(160, Math.min(320, (bottom - top) * 1.0, Math.max(roomRight, roomLeft)));
-    x = roomRight >= roomLeft ? right + gap : left - gap - size;
-    y = (top + bottom) / 2 - size * 0.6;
-  } else {
-    size = 260; x = innerWidth - size - 24; y = innerHeight * 0.18;  // no cube: park top-right
-  }
-  // Keep clear of the readouts (top-left), the progress bars (left) and the instruction card (bottom).
-  x = Math.max(110, Math.min(innerWidth - size - 16, x));
-  y = Math.max(120, Math.min(innerHeight - size - 190, y));
-  ghostPos = ghostPos ? ghostPos.map((v, i) => v + ([x, y, size][i] - v) * 0.15) as [number, number, number] : [x, y, size];
-  ghostBox.style.transform = `translate(${ghostPos[0]}px, ${ghostPos[1]}px)`;
-  ghostBox.style.width = ghostBox.style.height = `${ghostPos[2]}px`;
+  const size = Math.max(160, Math.min(240, Math.min(innerWidth, innerHeight) * 0.3));
+  const x = innerWidth - size - 16, y = 60;
+  ghostBox.style.transform = `translate(${x}px, ${y}px)`;
+  ghostBox.style.width = ghostBox.style.height = `${size}px`;
 }
 link.onConnection = (up) => hud.say(up ? '' : 'Connecting to the vision server…');
 
