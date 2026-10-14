@@ -32,7 +32,8 @@ import java.nio.ByteBuffer
  */
 class TutorEngine(
     private val context: Context,
-    private val onStatus: (String) -> Unit,
+    /** Where the status line goes (a new copy of the tutor screen points it at itself). */
+    @Volatile var onStatus: (String) -> Unit,
 ) {
     companion object {
         private const val TAG = "TutorEngine"

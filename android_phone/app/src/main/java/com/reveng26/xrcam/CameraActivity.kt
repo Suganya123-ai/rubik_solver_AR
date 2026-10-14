@@ -45,18 +45,43 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
         const val EXTRA_SERVER = "server"
         private const val TAG = "CameraActivity"
         private const val ACTION_CAMERA_PERMISSION = "com.reveng26.xrcam.CAMERA_USB_PERMISSION"
+        private const val HANDOVER_MS = 6000L
+
+        // The camera stream, its decoder and the tutor belong to the app, not to one screen. XREAL's
+        // app closes this screen and opens a new copy of it when the glasses connect (into its own
+        // virtual screen, which this app then leaves again): if the closing copy stopped the camera
+        // while the new copy started it again, the camera sent nothing. Now a screen closed by anyone
+        // but the user hands everything on, and it is stopped only if no new copy takes it over soon.
+        private var sharedHelper: UvcCameraHelper? = null
+        private var sharedEngine: TutorEngine? = null
+        private var sharedDecoder: MediaCodec? = null
+        private var sharedDecoderReady = false
+        private var sharedVps: ByteArray? = null
+        private var sharedSps: ByteArray? = null
+        private var sharedPps: ByteArray? = null
+        private var sharedDecodedFrames = 0
+        private var sharedStreamed = false
+        private val sharedNals = ConcurrentLinkedQueue<ByteArray>()
+        private var sharedDecoderThread: HandlerThread? = null
+        private var sharedDecoderHandler: Handler? = null
+        private val main = Handler(Looper.getMainLooper())
+        private var pendingStop: Runnable? = null
     }
 
     private lateinit var binding: ActivityCameraBinding
-    private lateinit var cameraHelper: UvcCameraHelper
+    private val cameraHelper: UvcCameraHelper get() = sharedHelper!!
     private lateinit var cameraType: GlassesConnection.CameraType
     private val handler = Handler(Looper.getMainLooper())
     private var usbManager: UsbManager? = null
 
     private var surface: Surface? = null
-    private var uploader: TutorEngine? = null
+    private var uploader: TutorEngine?
+        get() = sharedEngine
+        set(value) { sharedEngine = value }
     private var closing = false
-    private var streamed = false   // the camera has streamed at least once in this screen
+    private var streamed: Boolean   // the camera has streamed at least once
+        get() = sharedStreamed
+        set(value) { sharedStreamed = value }
     private var lastComeBack = 0L
     private var glassesScreen: GlassesScreen? = null
     private var frameCount = 0L
@@ -68,17 +93,17 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
     private var pendingDevice: UsbDevice? = null
 
     // H.265/HEVC decoder state
-    private var decoder: MediaCodec? = null
-    private var decoderReady = false
-    private var vpsNal: ByteArray? = null
-    private var spsNal: ByteArray? = null
-    private var ppsNal: ByteArray? = null
-    private var decodedFrames = 0
+    private var decoder: MediaCodec? get() = sharedDecoder; set(v) { sharedDecoder = v }
+    private var decoderReady: Boolean get() = sharedDecoderReady; set(v) { sharedDecoderReady = v }
+    private var vpsNal: ByteArray? get() = sharedVps; set(v) { sharedVps = v }
+    private var spsNal: ByteArray? get() = sharedSps; set(v) { sharedSps = v }
+    private var ppsNal: ByteArray? get() = sharedPps; set(v) { sharedPps = v }
+    private var decodedFrames: Int get() = sharedDecodedFrames; set(v) { sharedDecodedFrames = v }
 
     // Decoder runs on its own thread so USB reads are never blocked
-    private val nalQueue = ConcurrentLinkedQueue<ByteArray>()
-    private var decoderThread: HandlerThread? = null
-    private var decoderHandler: Handler? = null
+    private val nalQueue get() = sharedNals
+    private var decoderThread: HandlerThread? get() = sharedDecoderThread; set(v) { sharedDecoderThread = v }
+    private var decoderHandler: Handler? get() = sharedDecoderHandler; set(v) { sharedDecoderHandler = v }
 
     private val permissionReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
@@ -111,6 +136,11 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
         // --- Cube Tutor bridge: show the tutor page on top and upload the camera picture to the laptop ---
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         val server = intent.getStringExtra(EXTRA_SERVER).orEmpty()
+        // A copy of this screen that was just closed by XREAL's app left everything running: take it over.
+        val adopted = pendingStop != null && sharedHelper != null
+        pendingStop?.let { main.removeCallbacks(it) }
+        pendingStop = null
+        if (adopted) Log.d(TAG, "taking over the running camera and tutor")
         TutorEngine.startServer(this)   // before the pages below ask it for anything
         binding.tutorView.apply {
             settings.javaScriptEnabled = true
@@ -135,10 +165,14 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
             binding.btnToggleView.text = if (showTutor) "Camera" else "Tutor"
         }
         if (server.isNotEmpty()) {
-            startForegroundService(Intent(this, TutorService::class.java))   // all processor cores (see TutorService)
-            uploader = TutorEngine(this) { status ->
-                handler.post { binding.uploadStatusText.text = status }
-            }.also { it.start() }
+            val onStatus: (String) -> Unit = { status -> handler.post { binding.uploadStatusText.text = status } }
+            if (adopted && uploader != null) {
+                uploader!!.onStatus = onStatus
+            } else {
+                startForegroundService(Intent(this, TutorService::class.java))   // all processor cores (see TutorService)
+                uploader = TutorEngine(this, onStatus).also { it.start() }
+            }
+            binding.btnZoom.text = "Zoom ${uploader!!.zoom}x"
             binding.btnZoom.setOnClickListener {  // how much of the wide camera view is sent: 2x -> 3x -> 1x
                 val up = uploader ?: return@setOnClickListener
                 up.zoom = if (up.zoom >= 3) 1 else up.zoom + 1
@@ -164,13 +198,11 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
         }
 
         binding.cameraStatusText.text = "Searching for ${cameraType.name} camera..."
-        cameraHelper = UvcCameraHelper(this)
+        if (!adopted || sharedHelper == null) sharedHelper = UvcCameraHelper(applicationContext)
         cameraHelper.listener = this
 
         binding.btnClose.setOnClickListener {
-            closing = true
-            uploader?.stop()
-            cameraHelper.stopStream()
+            closing = true   // onDestroy stops everything
             finish()
         }
 
@@ -194,9 +226,11 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
             override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
         }
 
-        // Start decoder thread
-        decoderThread = HandlerThread("HEVC-Decoder").also { it.start() }
-        decoderHandler = Handler(decoderThread!!.looper)
+        // Start decoder thread (kept if a running session was taken over)
+        if (decoderThread == null) {
+            decoderThread = HandlerThread("HEVC-Decoder").also { it.start() }
+            decoderHandler = Handler(decoderThread!!.looper)
+        }
     }
 
     private fun tryFindCamera() {
@@ -294,19 +328,40 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
 
     override fun onDestroy() {
         super.onDestroy()
-        stopService(Intent(this, TutorService::class.java))
-        uploader?.stop()
-        uploader = null
         glassesScreen?.stop()
         glassesScreen = null
         binding.tutorView.destroy()
-        cameraHelper.stopStream()
+        surface?.release()
+        try { unregisterReceiver(permissionReceiver) } catch (_: Exception) {}
+        if (closing) {   // the user's Close, or a restart: stop now
+            stopEverything()
+            return
+        }
+        // Closed by someone else (XREAL's app reopening this screen): keep the camera and the tutor
+        // running for a new copy of this screen to take over, and stop them only if none comes.
+        Log.d(TAG, "screen closed by another app: keeping the camera running for ${HANDOVER_MS / 1000} s")
+        val app = applicationContext
+        val stop = Runnable {
+            pendingStop = null
+            Log.d(TAG, "no screen took the camera over: stopping it")
+            stopEverything(app)
+        }
+        pendingStop = stop
+        main.postDelayed(stop, HANDOVER_MS)
+    }
+
+    private fun stopEverything(app: Context = applicationContext) {
+        app.stopService(Intent(app, TutorService::class.java))
+        uploader?.stop()
+        uploader = null
+        sharedHelper?.stopStream()
+        sharedHelper = null
         releaseDecoder()
         decoderThread?.quitSafely()
         decoderThread = null
         decoderHandler = null
-        surface?.release()
-        try { unregisterReceiver(permissionReceiver) } catch (_: Exception) {}
+        vpsNal = null; spsNal = null; ppsNal = null
+        streamed = false
     }
 
     // --- H.265/HEVC Decoder ---
