@@ -52,3 +52,6 @@ bench/*.log
 # Solving sessions and scan recordings (camera frames; local diagnostics only)
 data/sessions/
 data/scans/
+
+# Pyraminx distance table (rebuilt in ~4 s on first use)
+pyra/table.npz
