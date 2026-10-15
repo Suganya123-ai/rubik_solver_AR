@@ -53,11 +53,18 @@ Keys: `S` scan, `Enter` confirm/solve, `→` "I did it", `N` new plan, `Esc` sto
   solves with a deliberate wrong move (14 Oct 2026: scans 45/45, wrong move caught 42/45, no false
   "wrong move" calls).
 - `cd bench && PYTHONPATH=.. python make_pyra_video.py out.y4m`: a test video for Chrome's fake camera
-  (scan, a wrong move and its undo, the solve).
+  (scan, a wrong move and its undo, the solve). With `models/pyra_pose_v1.pt` (16 Oct 2026): scanned
+  (3 stickers to check), wrong move caught and undone, 8 moves followed, solved.
+
+The pyramid finder (`models/pyra_pose_v1.pt`, 15 passes, ~1h40 on an M1 Pro), on 600 rendered test
+pictures it never trained on: pyramids found 479 of 481 (99.6%); corners within 2.5% of its size
+(median), 6.4% (90th percentile); no pyramid imagined in 119 empty pictures or plain frames.
 
 ## Not done yet
 
 - Trained on rendered pyramids only: real frames from your puzzle (the app can record them) would
   make finding it more reliable, as they did for the cube.
+- It takes most pictures of a 3x3 cube for a pyramid (33 of 40): it never saw a cube while
+  training. Adding cube pictures as counter-examples would fix that.
 - No hand masking: fingers on stickers are handled by the colour decoding and by waiting for still,
   clear views.
