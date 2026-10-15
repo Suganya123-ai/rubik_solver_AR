@@ -1,6 +1,6 @@
 {
  "n": 100,
- "model": "cube_pose_v2.pt",
+ "model": "cube_pose_v3.pt",
  "results": {
   "stickerless|normal": {
    "gt_auto_ok": 8.0,
@@ -10,13 +10,13 @@
    "gt_final_wrong": 0.0,
    "gt_rejected": 2.0,
    "gt_checked_stickers": 503.0,
-   "yolo_auto_ok": 9.0,
+   "yolo_auto_ok": 8.0,
    "yolo_auto_wrong": 0.0,
-   "yolo_check": 91.0,
-   "yolo_final_ok": 100.0,
-   "yolo_final_wrong": 0.0,
+   "yolo_check": 92.0,
+   "yolo_final_ok": 99.0,
+   "yolo_final_wrong": 1.0,
    "yolo_rejected": 0.0,
-   "yolo_checked_stickers": 610.0,
+   "yolo_checked_stickers": 659.0,
    "yolo_found_both": 100.0
   },
   "stickerless|hard": {
@@ -27,13 +27,13 @@
    "gt_final_wrong": 0.0,
    "gt_rejected": 1.0,
    "gt_checked_stickers": 708.0,
-   "yolo_auto_ok": 1.0,
+   "yolo_auto_ok": 2.0,
    "yolo_auto_wrong": 0.0,
-   "yolo_check": 99.0,
+   "yolo_check": 98.0,
    "yolo_final_ok": 100.0,
    "yolo_final_wrong": 0.0,
    "yolo_rejected": 0.0,
-   "yolo_checked_stickers": 877.0,
+   "yolo_checked_stickers": 879.0,
    "yolo_found_both": 100.0
   },
   "stickerless|real": {
@@ -50,7 +50,7 @@
    "yolo_final_ok": 100.0,
    "yolo_final_wrong": 0.0,
    "yolo_rejected": 0.0,
-   "yolo_checked_stickers": 1165.0,
+   "yolo_checked_stickers": 1161.0,
    "yolo_found_both": 100.0
   },
   "stickered|normal": {
@@ -67,7 +67,7 @@
    "yolo_final_ok": 100.0,
    "yolo_final_wrong": 0.0,
    "yolo_rejected": 0.0,
-   "yolo_checked_stickers": 731.0,
+   "yolo_checked_stickers": 725.0,
    "yolo_found_both": 100.0
   },
   "stickered|hard": {
@@ -78,13 +78,13 @@
    "gt_final_wrong": 0.0,
    "gt_rejected": 1.0,
    "gt_checked_stickers": 769.0,
-   "yolo_auto_ok": 3.0,
+   "yolo_auto_ok": 2.0,
    "yolo_auto_wrong": 0.0,
-   "yolo_check": 97.0,
+   "yolo_check": 98.0,
    "yolo_final_ok": 100.0,
    "yolo_final_wrong": 0.0,
    "yolo_rejected": 0.0,
-   "yolo_checked_stickers": 895.0,
+   "yolo_checked_stickers": 863.0,
    "yolo_found_both": 100.0
   },
   "stickered|real": {
@@ -95,13 +95,13 @@
    "gt_final_wrong": 3.0,
    "gt_rejected": 2.0,
    "gt_checked_stickers": 918.0,
-   "yolo_auto_ok": 1.0,
+   "yolo_auto_ok": 0.0,
    "yolo_auto_wrong": 0.0,
-   "yolo_check": 99.0,
-   "yolo_final_ok": 96.0,
-   "yolo_final_wrong": 4.0,
+   "yolo_check": 100.0,
+   "yolo_final_ok": 97.0,
+   "yolo_final_wrong": 3.0,
    "yolo_rejected": 0.0,
-   "yolo_checked_stickers": 1085.0,
+   "yolo_checked_stickers": 1102.0,
    "yolo_found_both": 100.0
   }
  }

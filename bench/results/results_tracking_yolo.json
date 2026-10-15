@@ -1,32 +1,32 @@
 {
- "n": 300,
+ "n": 150,
  "results": {
   "normal|yolo": {
-   "correct": 98.66666666666667,
+   "correct": 100.0,
    "wrong": 0.0,
-   "unsure": 0.6666666666666666,
-   "lost": 0.6666666666666666,
+   "unsure": 0.0,
+   "lost": 0.0,
    "no_kpts": 0.0,
-   "ms_median": 130.17718750052154,
+   "ms_median": 130.40604151319712,
    "by_event": {
-    "wrong single move": 96.5909090909091,
-    "did expected move": 99.03846153846153,
+    "wrong single move": 100.0,
+    "did expected move": 100.0,
     "two quick moves": 100.0,
     "no move yet": 100.0
    }
   },
   "hard|yolo": {
-   "correct": 90.33333333333333,
+   "correct": 91.33333333333333,
    "wrong": 0.0,
    "unsure": 0.6666666666666666,
-   "lost": 9.0,
+   "lost": 8.0,
    "no_kpts": 0.0,
-   "ms_median": 126.58991699572653,
+   "ms_median": 129.51543799135834,
    "by_event": {
-    "wrong single move": 89.77272727272727,
-    "did expected move": 94.23076923076923,
-    "two quick moves": 87.17948717948718,
-    "no move yet": 86.95652173913044
+    "wrong single move": 93.18181818181819,
+    "did expected move": 92.3076923076923,
+    "two quick moves": 77.27272727272727,
+    "no move yet": 96.875
    }
   }
  }
