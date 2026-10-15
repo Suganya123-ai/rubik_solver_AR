@@ -1,0 +1,6 @@
+/* Pyraminx-only additions to the cube app's style.css */
+.pyra-net { width: 100%; max-width: 560px; height: auto; display: block; margin: 8px auto; }
+.pyra-net polygon { cursor: pointer; stroke: #0b1016; stroke-width: 1.5; }
+.pyra-net polygon.doubtful { stroke: var(--amber); stroke-width: 3; animation: pyra-pulse 1s infinite alternate; }
+.pyra-net .net-label { fill: #9fdcea; font: 11px "JetBrains Mono", monospace; text-transform: uppercase; }
+@keyframes pyra-pulse { from { stroke-opacity: 0.4; } to { stroke-opacity: 1; } }
