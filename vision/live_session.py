@@ -78,6 +78,7 @@ class LiveClient:
         self.busy = BusyHands()   # are the hands turning the cube right now?
         self.recorder = None      # SessionRecorder while solving
         self._scan_dir = None     # where the current scan's views are recorded
+        self._miss_saved = 0.0    # when a "cube not found" frame was last saved
         self._seen = {}           # frame counts since the last log line
         self._logged_at = time.monotonic()
 
@@ -97,15 +98,21 @@ class LiveClient:
             result['scan'] = self.scan.feed(result)
             if result['scan']['event'] in ('captured', 'done'):
                 self._record_scan_view(jpeg, result)
-            elif result['scan'].get('message') and result['scan'].get('repeated'):
+            elif result['scan'].get('message') and result['scan'].get('refused'):
                 self._record_rejected_view(jpeg, result)
             if result['scan']['event'] == 'done':
                 self.scan_rgbs = self.scan.rgbs  # (assembled for the way the cube was actually held)
                 result['scan_result'] = _scan_json(self.scan.result)
-                log.info('%s: scan complete (valid=%s, doubtful=%d)', self.name, self.scan.result['valid'],
-                         len(self.scan.result['doubtful']))
+                log.info('%s: scan complete in %d views (valid=%s, doubtful=%d)', self.name, self.scan.views,
+                         self.scan.result['valid'], len(self.scan.result['doubtful']))
                 self.scan = None
         if self.track is not None:
+            # A sample of the frames where the cube wasn't found (one every 2 s): they show why
+            # tracking stalls, and are what a detector trained for this camera needs.
+            if self.recorder and not result.get('confident') and time.monotonic() - self._miss_saved > 2.0:
+                self._miss_saved = time.monotonic()
+                self.recorder.write({'missed': True, 'confidence': result.get('confidence'),
+                                     'hands': len(result.get('hands') or [])}, jpeg)
             result['track'] = _describe(self.track.feed(result))
             event = result['track']['event']
             if event and event != 'unsure':
@@ -118,12 +125,12 @@ class LiveClient:
         return result
 
     def _record_scan_view(self, jpeg, result):
-        """Saves each captured scan view (the frame, its corners and the colours
+        """Saves each captured scan view (view1.jpg, view2.jpg, ...: the frame, its corners and the colours
         read) to data/scans/<day>/<time>/, so a wrong scan can be looked at.
         Local files only; RUBIK_RECORD=0 turns it off."""
         if os.environ.get('RUBIK_RECORD', '1') == '0':
             return
-        view = 1 if result['scan']['event'] == 'captured' else 2
+        view = self.scan.views  # the view just captured
         if view == 1 or self._scan_dir is None:
             self._scan_dir = os.path.join(SCAN_DIR, datetime.now().strftime('%Y-%m-%d'), datetime.now().strftime('%H%M%S'))
             os.makedirs(self._scan_dir, exist_ok=True)
@@ -131,7 +138,7 @@ class LiveClient:
             fh.write(jpeg)
         record = {'view': view, 'keypoints': result.get('keypoints'), 'reading': self.scan.readings.get(view),
                   'frame_faces': result.get('faces'), 'covered': result.get('covered')}
-        if view == 2 and self.scan.result is not None:
+        if self.scan.result is not None:
             record['result'] = _scan_json(self.scan.result)
         with open(os.path.join(self._scan_dir, 'scan.jsonl'), 'a') as fh:
             fh.write(json.dumps(record, default=float) + '\n')
@@ -145,10 +152,10 @@ class LiveClient:
         with open(os.path.join(self._scan_dir, 'view2_refused.jpg'), 'wb') as fh:
             fh.write(jpeg)
         with open(os.path.join(self._scan_dir, 'view2_refused.json'), 'w') as fh:
-            json.dump({'repeated': result['scan']['repeated'], 'keypoints': result.get('keypoints'),
-                       'reading': self.scan.rejected}, fh, default=float)
-        log.info('%s: view 2 refused: the side in position %s was already scanned', self.name,
-                 result['scan']['repeated'])
+            json.dump({'refused': result['scan']['refused'], 'keypoints': result.get('keypoints'),
+                       'reading': self.scan.rejected, 'sides_done': result['scan'].get('sides_done')}, fh, default=float)
+        log.info('%s: view not added (%s), %s of 6 sides scanned so far', self.name, result['scan']['refused'],
+                 result['scan'].get('sides_done'))
 
     def _note(self, result):
         """Counts what the camera saw and logs a summary every few seconds while
