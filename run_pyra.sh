@@ -15,5 +15,5 @@ fi
 "$PY" -m uvicorn main_pyra:app --host 127.0.0.1 --port "${VISION_PORT:-8102}" &
 SERVER=$!
 trap 'kill $SERVER 2>/dev/null' EXIT
-echo "Open http://localhost:${APP_PORT:-5175}/pyra.html  (Pyraminx vision server on :${VISION_PORT:-8102})"
-cd web && RUBIK_SERVER="http://127.0.0.1:${VISION_PORT:-8102}" npx vite --port "${APP_PORT:-5175}" --strictPort
+echo "Open http://localhost:${APP_PORT:-5175}  (the Pyraminx app; Pyraminx vision server on :${VISION_PORT:-8102})"
+cd web && PYRA_HOME=1 RUBIK_SERVER="http://127.0.0.1:${VISION_PORT:-8102}" npx vite --port "${APP_PORT:-5175}" --strictPort

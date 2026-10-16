@@ -13,7 +13,7 @@ ports, so it can run beside them.
 ```
 git clone -b pyraminx https://github.com/Suganya123-ai/rubik_solver_AR.git
 cd rubik_solver_AR
-./run_pyra.sh            # then open http://localhost:5175/pyra.html  (vision server on 8102)
+./run_pyra.sh            # then open http://localhost:5175  (vision server on 8102)
 ```
 
 ## Using it
