@@ -5,7 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 PY=${PY:-../../rubik_solver_AR/.venv/bin/python}
-APPS=${APPS:-"../../rubik_solver_AR_webcam ../../rubik_solver_AR_anyside ../../rubik_solver_AR_glasses"}
+APPS=${APPS:-"../../rubik_solver_AR_webcam ../../rubik_solver_AR_glasses"}   # the recordings v2 was made from
 PYTHONPATH=.. $PY make_pyra_hard.py
 PYTHONPATH=.. $PY make_pyra_real_hands.py ../models/cube_pose_v3.pt $APPS
 # half of the original renders (every other one), so the new pictures weigh more
