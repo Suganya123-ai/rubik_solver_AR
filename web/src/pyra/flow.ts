@@ -11,7 +11,7 @@ type Scan = { phase: string; steady: number; needed: number; message: string | n
   instruction: string | null; event: string | null; refused?: string };
 type ScanResult = { state: string; valid: boolean; doubtful: number[]; colour_of: Record<string, string>; colours: string[] };
 export type Track = { phase: string; step: number; total: number; move: string | null; undo: string[]; state: string;
-  hold: string[] | null; view: 'corner' | 'edge' | null; event: string | null; message: string | null;
+  hold: string[] | null; view: 'corner' | 'edge' | null; fix?: boolean; event: string | null; message: string | null;
   colour_of: Record<string, string> };
 type Frame = { confident?: boolean; confidence?: number | null; keypoints?: [number, number][] | null;
   scan?: Scan; scan_result?: ScanResult; track?: Track };
@@ -47,7 +47,7 @@ export class PyraFlow {
         <div class="card-buttons" id="review-buttons"></div>
       </div>
       <div class="popup" id="popup" hidden>
-        <div class="popup-head"><span>⚠ Undo the step</span><button id="popup-close" aria-label="Close">✕</button></div>
+        <div class="popup-head"><span id="popup-title">⚠ Undo the step</span><button id="popup-close" aria-label="Close">✕</button></div>
         <div class="popup-body"><div class="popup-icon">↶</div><div><b id="popup-move"></b><div id="popup-text"></div></div></div>
       </div>
       <div class="progress" id="progress" hidden>
@@ -57,7 +57,7 @@ export class PyraFlow {
       </div>
       <div class="stats" id="stats" hidden></div>`;
     for (const id of ['card', 'card-label', 'card-title', 'card-text', 'card-steady', 'card-buttons', 'review', 'review-title',
-      'net', 'review-buttons', 'popup', 'popup-move', 'popup-text', 'popup-close', 'progress', 'bar-progress', 'bar-cube',
+      'net', 'review-buttons', 'popup', 'popup-title', 'popup-move', 'popup-text', 'popup-close', 'progress', 'bar-progress', 'bar-cube',
       'percent', 'stats']) {
       this.el[id] = root.querySelector('#' + id)!;
     }
@@ -225,9 +225,12 @@ export class PyraFlow {
     if (undo) {
       buttons.splice(1, 0, ['New plan instead  (N)', () => this.link.send({ type: 'track_replan' }), '']);
       this.el.popup.hidden = false;
+      this.el['popup-title'].textContent = t.fix ? '⚠ Wrong way' : '⚠ Undo the step';
       this.el['popup-move'].textContent = words.title;
       this.el['popup-text'].textContent = (t.message ?? '') + ' Then the same plan carries on.';
-      this.card('UNDO THE STEP', words.title, words.how, buttons, 'bad');
+      this.card(t.fix ? 'WRONG WAY: ONCE MORE THE SAME WAY' : 'UNDO THE STEP', words.title,
+        t.fix ? 'You turned the right part the other way: keep going the way you turned it, one more third. The arrow shows it.'
+          : words.how, buttons, 'bad');
     } else {
       this.el.popup.hidden = true;
       this.card(`MOVE ${t.step + 1} OF ${t.total}`, words.title, words.how + (t.event === 'correct' ? '  ✓ Correct.' : ''),

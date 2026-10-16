@@ -96,3 +96,22 @@ def test_edge_scan_needs_the_right_turn():
                 break
         t += 4
     assert events == ['captured', 'nothing new', 'done'] and s.result['valid']
+
+
+def test_wrong_way_is_fixed_by_one_more_turn_the_same_way():
+    """The planned corner turned the other way: the fix is one more turn the way it was turned (the arrow
+    flips), it lands where the plan wanted, and the plan carries on."""
+    from pyra.tracker import TrackSession
+    st = apply_moves(SOLVED, "B L' U")
+    plan = solve(st)
+    tr = TrackSession(''.join(st), plan, {L: [0, 0, 0] for L in 'FRLD'})
+    e = tr.expected
+    w = e[:-1] if e.endswith("'") else e + "'"
+    out = tr._moved(w)
+    assert out['event'] == 'wrong' and out['fix'] and out['move'] == w and out['phase'] == 'undo'
+    out = tr._moved(out['move'])
+    assert out['event'] == 'correct' and not out['fix'] and out['step'] == 1
+    assert ''.join(tr.state) == ''.join(apply_moves(st, plan[:1]))
+    while not tr.done:
+        tr._moved(tr.expected)
+    assert is_solved(tr.state)
