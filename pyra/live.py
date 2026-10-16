@@ -13,6 +13,7 @@ import time
 import cv2
 import numpy as np
 
+from . import record
 from .geometry import COLOURS
 from .scan import ScanSession, scan_result
 from .solver import solve, table
@@ -88,11 +89,23 @@ class PyraClient:
         self.rgbs = None
         self.last = None        # last scan result (with the user's corrections)
         self.track = None
+        self.recorder = None    # frames saved for training (pyra/record.py)
+
+    def _record(self, method, *args):
+        """Recording must never get in the way of the app."""
+        try:
+            if self.recorder is None and record.enabled():
+                self.recorder = record.Recorder(self.name)
+            if self.recorder is not None:
+                getattr(self.recorder, method)(*args)
+        except Exception:
+            log.exception('%s: recording failed (the app carries on)', self.name)
 
     def handle_frame(self, data):
         if len(data) < 5 or len(data) > MAX_FRAME_BYTES:
             raise ProtocolError('bad frame message')
         frame_id = int.from_bytes(data[:4], 'big')
+        stage = 'scan' if self.scan is not None else 'track' if self.track is not None else 'idle'
         result = process_frame(data[4:])
         result['frame'] = frame_id
         if self.scan is not None:
@@ -108,6 +121,9 @@ class PyraClient:
             ev = result['track']['event']
             if ev and ev != 'unsure':
                 log.info('%s: %s %s', self.name, ev, result['track'].get('message') or '')
+        self._record('frame', data[4:], result, stage)
+        if result.get('scan_result'):
+            self._record('note', {'scan_result': result['scan_result'], 'rgbs': self.rgbs})
         return result
 
     def _track_json(self, status):
@@ -156,12 +172,14 @@ class PyraClient:
         state = np.array(list(self.last['state']))
         plan = solve(state)
         self.track = TrackSession(state, plan, letter_features(self.rgbs, state))
+        self._record('note', {'solving': ''.join(state), 'plan': plan, 'corrected': {str(k): v for k, v in self._locked(cmd).items()}})
         log.info('%s: solving, %d moves: %s', self.name, len(plan), ' '.join(plan))
         return {'type': 'track', 'plan': plan, 'track': self._track_json(self.track.status())}
 
     def _cmd_track_skip(self, _):
         if self.track is None:
             raise ProtocolError('not tracking')
+        self._record('note', {'skipped': self.track.expected, 'state': ''.join(self.track.state)})   # the camera missed it
         return {'type': 'track', 'track': self._track_json(self.track.skip())}
 
     def _cmd_track_replan(self, _):

@@ -55,3 +55,6 @@ data/scans/
 
 # Pyraminx distance table (rebuilt in ~4 s on first use)
 pyra/table.npz
+
+# Pyraminx demo frames saved for training (pyra/record.py)
+data/pyra_sessions/

@@ -34,6 +34,13 @@ cd rubik_solver_AR
 5. **Wrong move:** "Undo the step" with the turn that reverses it; more than 3 off, or *New plan
    instead*, gives a new plan from where the puzzle is.
 
+**Recording for training.** Every time the app is used, camera frames are saved (as the camera sent
+them, without the grid or arrows) to `data/pyra_sessions/<day>/<time>/`, with `frames.jsonl`: for each
+frame what the model found and what the app was doing, plus the scan result, the plan, each move
+verdict and each "I did it". About 2 frames a second while scanning or solving, every event, the
+unsure frames, one every 2 s otherwise; at most 3,000 per session (~130 MB). Local only, never in git;
+`PYRA_RECORD=0 ./run_pyra.sh` turns it off.
+
 Keys: `S` scan, `Enter` confirm/solve, `→` "I did it", `N` new plan, `Esc` stop.
 
 ## How it works
