@@ -1,5 +1,5 @@
-// The Pyraminx tutor flow (same look as the cube app): start -> scan (point corners at the camera
-// until all 4 faces are in) -> check colours -> solve -> live guided moves (wrong move: undo it,
+// The Pyraminx tutor flow (same look as the cube app): start -> scan (two views, each with an edge
+// toward the camera: two faces, then the other two) -> check colours -> solve -> live guided moves (wrong move: undo it,
 // then the same plan carries on) -> solved (confetti + stats).
 
 import type { AppState } from '../appState';
@@ -11,7 +11,8 @@ type Scan = { phase: string; steady: number; needed: number; message: string | n
   instruction: string | null; event: string | null; refused?: string };
 type ScanResult = { state: string; valid: boolean; doubtful: number[]; colour_of: Record<string, string>; colours: string[] };
 export type Track = { phase: string; step: number; total: number; move: string | null; undo: string[]; state: string;
-  hold: string[] | null; event: string | null; message: string | null; colour_of: Record<string, string> };
+  hold: string[] | null; view: 'corner' | 'edge' | null; event: string | null; message: string | null;
+  colour_of: Record<string, string> };
 type Frame = { confident?: boolean; confidence?: number | null; keypoints?: [number, number][] | null;
   scan?: Scan; scan_result?: ScanResult; track?: Track };
 
@@ -19,6 +20,9 @@ const LETTERS = ['F', 'R', 'L', 'D'];
 
 export class PyraFlow {
   guide: { move: string; undo: boolean } | null = null;
+  /** The arrow's direction on screen in words ("to the right", "clockwise"), set by main.ts as it draws it. */
+  arrowWord = '';
+  arrowFor = '';   // the move that arrowWord was worked out for
   track: Track | null = null;
   keypoints: [number, number][] | null = null;
   private review: ScanResult | null = null;
@@ -86,7 +90,7 @@ export class PyraFlow {
     this.guide = null; this.track = null;
     this.el.review.hidden = true; this.el.popup.hidden = true; this.el.progress.hidden = true;
     this.card('READY', 'Hold your pyramid up to the camera',
-      'A corner pointing at the camera, so three faces show. Then start the scan.',
+      'Tip up, with an edge pointing at the camera, so two faces show. Then start the scan: two views in all.',
       [['Start scan  (S)', () => this.startScan(), 'primary']]);
     this.steady(0);
   }
@@ -114,19 +118,20 @@ export class PyraFlow {
     if (s.event === 'captured') {
       this.beep(1);
       this.effects.check(performance.now());
-      this.card(`✓ ${s.faces_done} of 4 faces scanned`, 'Now point another corner at the camera',
-        'Any corner: the face you have not shown yet should come into view.', cancel, 'good');
+      this.card(`✓ ${s.faces_done} of 4 faces scanned`, 'Now turn it around',
+        'Show the other two faces: tip up again, an edge toward the camera.', cancel, 'good');
       this.holdUntil = performance.now() + 3000;
       return;
     }
     if (performance.now() < this.holdUntil) return;
     if (s.message) {
-      this.card(label, s.refused === 'nothing new' ? 'Those faces are already scanned' : 'Hold it corner-on',
+      this.card(label, s.refused === 'nothing new' ? 'Those faces are already scanned'
+        : s.refused === 'corner' ? 'Hold it edge-on' : 'Hold it still, edge-on',
         s.message, cancel, 'warn');
       this.holdUntil = performance.now() + 2500;
       return;
     }
-    this.card(label, s.steady ? 'Hold still…' : (s.faces_done ? 'Show the face not scanned yet' : 'Show the pyramid corner-on'),
+    this.card(label, s.steady ? 'Hold still…' : (s.faces_done ? 'Turn it around: the other two faces' : 'Show two faces, tip up'),
       s.instruction ?? '', cancel);
   }
 
@@ -214,7 +219,7 @@ export class PyraFlow {
     this.state.set(undo ? 'undo' : 'guided');
     this.state.error = undo;
     this.guide = t.move ? { move: t.move, undo } : null;
-    const words = t.move ? this.moveWords(t.move, t.hold) : { title: '', how: '' };
+    const words = t.move ? this.moveWords(t.move, t.hold, t.view) : { title: '', how: '' };
     const buttons: [string, () => void, string][] = [['I did it  (→)', () => this.link.send({ type: 'track_skip' }), ''],
       ['Stop  (Esc)', () => this.cancel(), '']];
     if (undo) {
@@ -230,25 +235,28 @@ export class PyraFlow {
     }
   }
 
-  /** "Turn the top corner" / "Twist the tip of the corner pointing at the camera", from where it is in the picture. */
+  /** "Turn the top corner to the right" / "Twist the tip of the left corner up": where the corner is in the
+   *  picture, and which way the arrow goes on screen. */
   private lastWhere: Record<string, string> = {};
 
-  private moveWords(move: string, hold: string[] | null): { title: string; how: string } {
+  private moveWords(move: string, hold: string[] | null, kind: 'corner' | 'edge' | null): { title: string; how: string } {
     const corner = move[0].toUpperCase(), tip = move[0] !== corner;
     // where that corner is in the (mirrored) picture; while the pyramid is out of view, the last place it was seen
     let where = this.lastWhere[move] ?? 'the marked corner';
     if (hold && this.keypoints) {
       const i = hold.indexOf(corner);
-      if (i === 0) where = 'the corner pointing at the camera';
-      else if (i > 0) {
+      if (i === 0 && kind !== 'edge') where = 'the corner pointing at the camera';
+      else if (i >= 0) {
         const k = this.keypoints, cx = (k[0][0] + k[1][0] + k[2][0] + k[3][0]) / 4, cy = (k[0][1] + k[1][1] + k[2][1] + k[3][1]) / 4;
         const dx = -(k[i][0] - cx), dy = k[i][1] - cy;   // the picture is mirrored
         where = `the ${Math.abs(dy) > Math.abs(dx) ? (dy < 0 ? 'top' : 'bottom') : (dx < 0 ? 'left' : 'right')} corner`;
+        if (kind === 'edge' && i === 1) where = 'the bottom corner (nearest you)';
       }
       this.lastWhere = { [move]: where };
     }
-    const title = tip ? `Twist the tip of ${where}` : `Turn ${where}`;
-    const how = `${tip ? 'Only the small tip.' : 'The tip and the layer under it, one third of a turn.'} Follow the arrow (x1), then hold the pyramid still.`;
+    const way = this.arrowWord && this.arrowFor === move ? ` ${this.arrowWord}` : '';
+    const title = tip ? `Twist the tip of ${where}${way}` : `Turn ${where}${way}`;
+    const how = `${tip ? 'Only the small tip (it lights up).' : 'The lit-up part: the tip and the layer under it, one third of a turn.'} Follow the arrow (x1), then hold the pyramid still.`;
     return { title, how };
   }
 

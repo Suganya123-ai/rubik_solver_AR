@@ -48,13 +48,13 @@ export function turningStickers(g: Geo, move: string): number[] {
 export function moveAngle(move: string): number { return (move.endsWith("'") ? 1 : -1) * (2 * Math.PI / 3); }
 
 /** 3D points of an arc around the layer a move turns, sweeping the way it turns, centred toward `toward`. */
-export function moveArc(g: Geo, move: string, toward: V3, sweepDeg = 230): V3[] {
+export function moveArc(g: Geo, move: string, toward: V3, sweepDeg = 230, lift = 1.15): V3[] {
   const corner = move[0].toUpperCase(), layers = move[0] === corner ? 2 : 1;
   const v = g.corners[corner], a = unit(v), height = norm(v) * 4 / 3;
   const depth = (layers === 2 ? 0.5 : 0.2) * height;
   const centre = sub(v, scale(a, depth));
   const edge = norm(sub(g.corners.U, g.corners.L));
-  const radius = 1.15 * (depth / height) * edge / Math.sqrt(3);
+  const radius = lift * (depth / height) * edge / Math.sqrt(3);
   let e1 = sub(toward, scale(a, dot(toward, a)));
   if (norm(e1) < 0.2) e1 = cross(a, [0.3, 1, 0.2]);
   e1 = unit(e1);
@@ -69,8 +69,41 @@ export function moveArc(g: Geo, move: string, toward: V3, sweepDeg = 230): V3[] 
   return pts;
 }
 
-/** An affine camera from the 4 corner points: hold[i] is the corner seen at keypoint i. */
-export function fitCamera(g: Geo, keypoints: Pt[], hold: string[]): (p: V3) => Pt {
+export type ViewKind = 'corner' | 'edge';
+/** The picture's faces as keypoint triples, as in pyra/view.py (corner-on: 3 faces, edge-on: 2). */
+export const VIEW_FACES: Record<ViewKind, number[][]> = { corner: [[0, 1, 2], [0, 2, 3], [0, 3, 1]], edge: [[0, 1, 2], [0, 1, 3]] };
+
+/** A face's 9 sticker triangles in barycentric weights over its 3 corners (as in pyra/view.py). */
+export function layoutTriangles(): number[][][] {
+  const up = (i: number, j: number, k: number) => [[i + 1, j, k], [i, j + 1, k], [i, j, k + 1]];
+  const down = (i: number, j: number, k: number) => [[i, j + 1, k + 1], [i + 1, j, k + 1], [i + 1, j + 1, k]];
+  return [up(2, 0, 0), up(0, 2, 0), up(0, 0, 2), down(1, 0, 0), down(0, 1, 0), down(0, 0, 1), up(1, 1, 0), up(0, 1, 1),
+    up(1, 0, 1)].map((t) => t.map((w) => w.map((x) => x / 3)));
+}
+
+/** The sticker grid in the picture from the 4 corner points: one triangle per sticker in view, in the
+ *  order the server reads them (so the i-th triangle is the i-th colour of a frame's `stickers`). */
+export function stickerGrid(k: Pt[], kind: ViewKind): Pt[][] {
+  const layout = layoutTriangles(), out: Pt[][] = [];
+  for (const vf of VIEW_FACES[kind]) {
+    const P = vf.map((i) => k[i]);
+    for (const tri of layout) {
+      out.push(tri.map((w) => [w[0] * P[0][0] + w[1] * P[1][0] + w[2] * P[2][0], w[0] * P[0][1] + w[1] * P[1][1] + w[2] * P[2][1]] as Pt));
+    }
+  }
+  return out;
+}
+
+/** The direction toward the camera in the puzzle's frame: the near corner, or the near edge's middle. */
+export function towardCamera(g: Geo, hold: string[], kind: ViewKind): V3 {
+  return unit(kind === 'edge' ? add(g.corners[hold[0]], g.corners[hold[1]]) : g.corners[hold[0]]);
+}
+
+export type Camera = ((p: V3) => Pt) & { dir: V3 };
+
+/** An affine camera from the 4 corner points: hold[i] is the corner seen at keypoint i. `dir` is the
+ *  direction toward the camera in the puzzle's frame (a surface faces the camera if its normal has dir > 0). */
+export function fitCamera(g: Geo, keypoints: Pt[], hold: string[], toward?: V3): Camera {
   const rows = hold.map((c) => [...g.corners[c], 1]);
   const solve = (rhs: number[]): number[] => {   // 4x4 Gaussian elimination
     const A = rows.map((r, i) => [...r, rhs[i]]);
@@ -87,7 +120,11 @@ export function fitCamera(g: Geo, keypoints: Pt[], hold: string[]): (p: V3) => P
     return A.map((r, i) => r[4] / (r[i] || 1e-12));
   };
   const mx = solve(keypoints.map((p) => p[0])), my = solve(keypoints.map((p) => p[1]));
-  return (p: V3) => [mx[0] * p[0] + mx[1] * p[1] + mx[2] * p[2] + mx[3], my[0] * p[0] + my[1] * p[1] + my[2] * p[2] + my[3]];
+  const cam = ((p: V3) => [mx[0] * p[0] + mx[1] * p[1] + mx[2] * p[2] + mx[3], my[0] * p[0] + my[1] * p[1] + my[2] * p[2] + my[3]]) as Camera;
+  let dir = unit(cross([mx[0], mx[1], mx[2]], [my[0], my[1], my[2]]));   // what the picture's x and y can't see: depth
+  if (toward && dot(dir, toward) < 0) dir = scale(dir, -1);
+  cam.dir = dir;
+  return cam;
 }
 
 export function strokeArrow(ctx: CanvasRenderingContext2D, pts: Pt[], colour: string, width: number, label?: string): void {

@@ -1,6 +1,7 @@
 // Pyraminx Tutor AR on a laptop webcam (branch `pyraminx`): the mirrored full-screen camera, the hand
-// mesh, the pyramid's outline and move arrows (from the Pyraminx vision server's 4 corner points),
-// the ghost pyramid top right, and the tutor flow (flow.ts).
+// mesh, the sticker grid on the real pyramid (from the Pyraminx vision server's 4 corner points; while
+// scanning, filled with the colours read), the move guide on it (the part that turns, highlighted and
+// shown turning, and an arrow), the ghost pyramid top right, and the tutor flow (flow.ts).
 
 import '../style.css';
 import './pyra.css';
@@ -13,7 +14,8 @@ import { Hud } from '../overlay/hud';
 import { ServerLink } from '../serverLink';
 import { View } from '../view';
 import { PyraFlow } from './flow';
-import { type Pt, fitCamera, geometry, loadGeometry, moveArc, strokeArrow, unit } from './geometry';
+import { type Geo, type Pt, type V3, type ViewKind, add, cross, dot, fitCamera, geometry, loadGeometry, moveAngle, moveArc,
+  rotate, scale, stickerGrid, strokeArrow, sub, towardCamera, turningStickers, unit } from './geometry';
 import { GhostPyramid } from './ghost';
 
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -30,13 +32,18 @@ const ghostBox = document.getElementById('ghost')!;
 const ghost = new GhostPyramid(document.getElementById('ghost-canvas') as HTMLCanvasElement, geometry);
 
 let lastConfident = -Infinity;
-let corners: { pts: Pt[]; frameW: number; at: number; conf: number } | null = null;
+type RGB = [number, number, number];
+let corners: { pts: Pt[]; frameW: number; at: number; conf: number; kind: ViewKind; stickers: (RGB | null)[] | null } | null = null;
 const frames: number[] = [];
 
 link.onFrame = (reply) => {
-  const r = reply as unknown as { confident: boolean; confidence: number | null; keypoints: Pt[] | null; width: number };
+  const r = reply as unknown as { confident: boolean; confidence: number | null; keypoints: Pt[] | null; width: number;
+    view: ViewKind | null; stickers: (RGB | null)[] | null };
   const now = performance.now();
-  if (r.confident && r.keypoints) { lastConfident = now; corners = { pts: r.keypoints, frameW: r.width, at: now, conf: r.confidence ?? 0 }; }
+  if (r.confident && r.keypoints) {
+    lastConfident = now;
+    corners = { pts: r.keypoints, frameW: r.width, at: now, conf: r.confidence ?? 0, kind: r.view ?? 'corner', stickers: r.stickers };
+  }
   flow.onFrame(reply as never);
   updateGhost();
 };
@@ -47,7 +54,7 @@ function updateGhost(): void {
   const t = flow.track;
   ghostBox.hidden = !t || !t.state;
   if (!t || !t.state) return;
-  ghost.show(t.state, t.colour_of, t.phase === 'solved' ? null : t.move, t.phase === 'undo', t.hold);
+  ghost.show(t.state, t.colour_of, t.phase === 'solved' ? null : t.move, t.phase === 'undo', t.hold, t.view);
   ghostBox.classList.toggle('warn', t.phase === 'undo');
   const size = Math.max(160, Math.min(240, Math.min(innerWidth, innerHeight) * 0.3));
   ghostBox.style.transform = `translate(${innerWidth - size - 16}px, 60px)`;
@@ -61,19 +68,103 @@ function resize(): void {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-function drawOutline(pts: Pt[], alpha: number, label: string): void {
+function path(pts: Pt[]): void {
+  ctx.beginPath();
+  pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath();
+}
+
+function shrink(pts: Pt[], f: number): Pt[] {
+  const c = pts.reduce((m, p) => [m[0] + p[0] / pts.length, m[1] + p[1] / pts.length], [0, 0]);
+  return pts.map((p) => [c[0] + (p[0] - c[0]) * f, c[1] + (p[1] - c[1]) * f] as Pt);
+}
+
+/** The sticker grid on the real pyramid; while scanning, each sticker filled with the colour read there. */
+function drawGrid(screen: Pt[][], alpha: number, colours: (RGB | null)[] | null, label: string, labelAt: Pt): void {
   ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.strokeStyle = '#5ee6ff';
-  ctx.lineWidth = 2;
-  for (const [a, b] of [[0, 1], [0, 2], [0, 3], [1, 2], [2, 3], [3, 1]]) {
-    ctx.beginPath(); ctx.moveTo(pts[a][0], pts[a][1]); ctx.lineTo(pts[b][0], pts[b][1]); ctx.stroke();
+  if (colours) {
+    screen.forEach((tri, i) => {
+      const c = colours[i];
+      if (!c) return;
+      path(shrink(tri, 0.45));
+      ctx.fillStyle = `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+      ctx.globalAlpha = 0.95;
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    });
   }
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.2;
+  for (const tri of screen) { path(tri); ctx.stroke(); }
   ctx.fillStyle = '#5ee6ff';
+  ctx.globalAlpha = 0.9;
   ctx.font = '11px "JetBrains Mono", monospace';
-  const top = pts.reduce((m, p) => (p[1] < m[1] ? p : m), pts[0]);
-  ctx.fillText(label, top[0] + 8, top[1] - 8);
+  ctx.fillText(label, labelAt[0] + 8, labelAt[1] - 8);
   ctx.restore();
+}
+
+/** A sticker's outward normal (the puzzle is centred on 0). */
+function normalOf(tri: V3[]): V3 {
+  const n = unit(cross(sub(tri[1], tri[0]), sub(tri[2], tri[0])));
+  const c = scale(add(add(tri[0], tri[1]), tri[2]), 1 / 3);
+  return dot(n, c) < 0 ? scale(n, -1) : n;
+}
+
+const PAUSE = 0.5, TURN = 1.1, HOLD = 0.7;
+
+/** On the real pyramid: the part that turns (highlighted where it is), the same part turning in a loop,
+ *  and the arrow (x1). Returns the arrow's direction on screen, in words. */
+function drawMove(g: Geo, move: string, undo: boolean, hold: string[], kind: ViewKind, now: number): string {
+  const c = corners!;
+  const toward = towardCamera(g, hold, kind);
+  const cam = fitCamera(g, c.pts, hold, toward);
+  const toScreen = (p: V3): Pt => view.fromFrame(cam(p), c.frameW);
+  const colour = undo ? '#ff6a3d' : '#3dff9a';
+  const turning = turningStickers(g, move);
+  const corner = move[0].toUpperCase(), axis = g.corners[corner];
+  const facing = (tri: V3[]) => dot(normalOf(tri), cam.dir) > 0.08;
+  ctx.save();
+  // 1. the part that turns, where it is now
+  for (const i of turning) {
+    const tri = g.stickers[i].tri;
+    if (!facing(tri)) continue;
+    path(tri.map(toScreen));
+    ctx.globalAlpha = 0.3; ctx.fillStyle = colour; ctx.fill();
+    ctx.globalAlpha = 0.95; ctx.strokeStyle = colour; ctx.lineWidth = 2.5; ctx.stroke();
+  }
+  // 2. the same part turning: the outline sweeps through the turn, then holds, then starts again
+  const t = (now / 1000) % (PAUSE + TURN + HOLD);
+  const p = t < PAUSE ? 0 : t < PAUSE + TURN ? (t - PAUSE) / TURN : 1;
+  const ease = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+  if (p > 0) {
+    const angle = moveAngle(move) * ease;
+    ctx.globalAlpha = p < 1 ? 0.95 : 0.6;
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+    for (const i of turning) {
+      const tri = g.stickers[i].tri.map((q) => rotate(q, axis, angle));
+      if (!facing(tri)) continue;
+      path(tri.map(toScreen)); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+  ctx.restore();
+  // 3. the arrow, around the front of the layer
+  const nearCorner = kind === 'corner' && hold[0] === corner;
+  const arc = moveArc(g, move, toward, nearCorner ? 230 : 170, 1.3).map(toScreen);
+  const k = c.pts.map((q) => view.fromFrame(q, c.frameW));
+  const size = Math.max(...k.map((q) => Math.hypot(q[0] - k[0][0], q[1] - k[0][1])));
+  strokeArrow(ctx, arc, colour, Math.max(4, size * 0.04), 'x1');
+  // its direction in words, as seen on screen
+  if (nearCorner) {
+    let area = 0;
+    for (let i = 0; i + 1 < arc.length; i++) area += arc[i][0] * arc[i + 1][1] - arc[i + 1][0] * arc[i][1];
+    return area > 0 ? 'clockwise' : 'anticlockwise';
+  }
+  const dx = arc[arc.length - 1][0] - arc[0][0], dy = arc[arc.length - 1][1] - arc[0][1];
+  return Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 'to the right' : 'to the left') : (dy > 0 ? 'down' : 'up');
 }
 
 function frame(now: number): void {
@@ -84,16 +175,15 @@ function frame(now: number): void {
   ctx.clearRect(0, 0, innerWidth, innerHeight);
   const fresh = corners && now - corners.at < 600;
   if (corners && fresh) {
-    const screen = corners.pts.map((p) => view.fromFrame(p, corners!.frameW));
-    drawOutline(screen, flow.guide ? 0.45 : 0.9, `PYRAMID ${Math.round(corners.conf * 100)}%`);
+    const c = corners;
+    const grid = stickerGrid(c.pts, c.kind).map((tri) => tri.map((p) => view.fromFrame(p, c.frameW)));
+    const top = c.pts.map((p) => view.fromFrame(p, c.frameW)).reduce((m, p) => (p[1] < m[1] ? p : m));
+    drawGrid(grid, flow.guide ? 0.35 : 0.7, state.phase === 'scan' ? c.stickers : null,
+      `PYRAMID ${Math.round(c.conf * 100)}%`, top);
     const g = geometry(), t = flow.track;
-    if (g && flow.guide && t?.hold) {   // the arrow on the real pyramid: an arc around the layer to turn
-      const cam = fitCamera(g, corners.pts, t.hold);
-      const arc = moveArc(g, flow.guide.move, unit(g.corners[t.hold[0]])).map((p) => view.fromFrame(cam(p), corners!.frameW));
-      const sweep = Math.min(1, ((now % 1400) / 1400) * 1.6);
-      const size = Math.hypot(screen[1][0] - screen[0][0], screen[1][1] - screen[0][1]);
-      strokeArrow(ctx, arc.slice(0, Math.max(4, Math.round(arc.length * sweep))), flow.guide.undo ? '#ff6a3d' : '#3dff9a',
-        Math.max(4, size * 0.05), 'x1');
+    if (g && flow.guide && t?.hold && t.view === c.kind) {
+      flow.arrowWord = drawMove(g, flow.guide.move, flow.guide.undo, t.hold, t.view, now);
+      flow.arrowFor = flow.guide.move;
     }
   }
   drawHands(ctx, hands.hands, view, video.videoHeight || 720, state.error);
@@ -104,7 +194,7 @@ function frame(now: number): void {
     serverMs: link.serverMs, confidence: corners && fresh ? corners.conf : 0, connected: link.connected });
   const active = ['camera', 'scan', 'guided', 'undo'].includes(state.phase);
   hud.showHint(active && link.connected && now - lastConfident > 800 ? true : false,
-    'Hold the pyramid steady inside the box, a corner pointing at the camera, so three faces show');
+    'Hold the pyramid steady, tip up, with an edge pointing at the camera so two faces show');
 }
 
 async function boot(): Promise<void> {

@@ -1,8 +1,8 @@
-// The ghost pyramid: the puzzle as it is now, held the way you hold it (the near corner toward you,
-// mirrored like the camera picture), playing the next move in a loop with an arrow and "x1".
+// The ghost pyramid: the puzzle as it is now, held the way you hold it (the near corner or the near
+// edge toward you, mirrored like the camera picture), playing the next move in a loop with an arrow and "x1".
 
-import { type Geo, type Pt, type V3, SWATCH, add, cross, dot, moveAngle, moveArc, rotate, scale, strokeArrow,
-  sub, turningStickers, unit } from './geometry';
+import { type Geo, type Pt, type V3, type ViewKind, SWATCH, add, cross, dot, moveAngle, moveArc, rotate, scale,
+  strokeArrow, sub, towardCamera, turningStickers, unit } from './geometry';
 
 const ARROW = '#3dff9a', UNDO = '#ff6a3d';
 const PAUSE = 0.7, TURN = 1.0, HOLD = 0.9;
@@ -12,7 +12,8 @@ export class GhostPyramid {
   colourOf: Record<string, string> = {};
   move: string | null = null;
   undo = false;
-  hold: string[] = ['U', 'L', 'R', 'B'];
+  hold: string[] = ['U', 'L', 'B', 'R'];
+  kind: ViewKind = 'edge';
   private start = performance.now();
   private ctx: CanvasRenderingContext2D;
 
@@ -21,19 +22,21 @@ export class GhostPyramid {
     requestAnimationFrame(this.frame);
   }
 
-  show(state: string, colourOf: Record<string, string>, move: string | null, undo: boolean, hold: string[] | null): void {
+  show(state: string, colourOf: Record<string, string>, move: string | null, undo: boolean, hold: string[] | null,
+    kind: ViewKind | null): void {
     if (state !== this.state || move !== this.move) this.start = performance.now();
     this.state = state; this.colourOf = colourOf; this.move = move; this.undo = undo;
-    if (hold) this.hold = hold;
+    if (hold) { this.hold = hold; this.kind = kind ?? 'corner'; }
   }
 
-  /** Model -> view: the near corner toward the viewer, the one at keypoint 1 up, mirrored left-right, tilted a little. */
+  /** Model -> view: the near corner (or edge) toward the viewer, up as in the picture (corner-on: the
+   *  corner at keypoint 1; edge-on: the near edge's top end), mirrored left-right, tilted a little. */
   private viewBasis(g: Geo): (p: V3) => V3 {
-    const z = unit(g.corners[this.hold[0]]);
-    const up = g.corners[this.hold[1]];
+    const z = towardCamera(g, this.hold, this.kind);
+    const up = this.kind === 'edge' ? sub(g.corners[this.hold[0]], g.corners[this.hold[1]]) : g.corners[this.hold[1]];
     const y = unit(sub(up, scale(z, dot(up, z))));
     const x = cross(y, z);
-    const tilt = 0.45;
+    const tilt = this.kind === 'edge' ? 0.35 : 0.45;
     return (p: V3) => {
       const v: V3 = [-dot(p, x), dot(p, y), dot(p, z)];          // mirrored like the picture
       const c = Math.cos(tilt), s = Math.sin(tilt);
@@ -89,8 +92,9 @@ export class GhostPyramid {
       ctx.globalAlpha = 1;
     });
     if (this.move) {
-      const toward = unit(g.corners[this.hold[0]]);
-      const arc = moveArc(g, this.move, toward).map(project);
+      const toward = towardCamera(g, this.hold, this.kind);
+      const near = this.kind === 'corner' && this.hold[0] === this.move[0].toUpperCase();
+      const arc = moveArc(g, this.move, toward, near ? 230 : 170, 1.3).map(project);
       strokeArrow(ctx, arc, this.undo ? UNDO : ARROW, size * 0.04, 'x1');
     }
   };

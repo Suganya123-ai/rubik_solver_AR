@@ -1,13 +1,12 @@
-"""The Pyraminx scan: views are captured whenever the puzzle is held still
-corner-on, until all 36 stickers have been seen.
+"""The Pyraminx scan: two views, each with an edge pointing at the camera (two whole faces in view).
 
-The first view fixes the frame (its near corner is called U, the one at k1 L,
-and so on). A corner-on view shows 3 of the 4 faces, so a second view with
-another corner toward the camera shows the 4th face plus two already scanned:
-those tell how the puzzle was turned (whichever of the 12 holds fits their
-colours best, clearly better than the next). Stickers seen in several views
-are averaged. Then colours.name_colours decodes the most likely possible
-position.
+The first view fixes the frame (EDGE_HOLDS[0]: its near edge's ends are called U and L, the far corners B and R).
+Turned around, the second view shows the other two faces. They share no sticker with the first
+view, so how the puzzle was turned (two ways: which end of the new near edge is on top) is told by
+decoding both: only the right one gives a possible Pyraminx that matches the colours well. A view
+that shares faces with what is scanned is placed by those shared colours instead (the same faces
+again: "already scanned"; one new face: added, and a third view finishes it). Then
+colours.name_colours decodes the most likely possible position.
 """
 import time
 
@@ -17,7 +16,7 @@ from cube.color_detect import color_feature
 
 from .colours import name_colours
 from .geometry import FACE_CORNERS, STICKERS
-from .view import HOLD_STICKERS, HOLDS
+from .view import EDGE_HOLD_STICKERS, EDGE_HOLDS, HOLDS
 
 STEADY_FRAMES = 3
 STEADY_SECONDS = 0.4
@@ -26,6 +25,7 @@ FRAME_GAP = 1 / 15
 MIN_FACE_SHARE = 0.15    # smallest face over the largest: below this a face is a sliver (see view.face_share)
 MATCH_MAX = 60           # mean colour distance of the shared stickers for a hold to count
 MATCH_MARGIN = 0.7       # ...and clearly better than the next-best hold
+TURN_MARGIN = 0.8        # second view: the decoded cost of one way of turning clearly below the other's
 SETTLE_S = 3.0           # after a capture, quiet while the user turns the puzzle
 
 
@@ -67,8 +67,8 @@ class ScanSession:
                 'steady': progress, 'needed': 10, 'message': message, 'faces_done': self.faces_done(),
                 'stickers_done': len(self.samples), 'views': self.views,
                 'instruction': None if self.result else (
-                    'Hold the pyramid with a corner pointing at the camera, so three faces show.' if self.views == 0
-                    else 'Now point another corner at the camera, so the face you have not shown yet is in view.')}
+                    'Hold the pyramid with an edge pointing at the camera, tip up, so two faces show.' if self.views == 0
+                    else 'Now turn it around to show the other two faces, again an edge toward the camera, tip up.')}
 
     def feed(self, fr, now=None):
         now = time.monotonic() if now is None else now
@@ -76,11 +76,16 @@ class ScanSession:
         if self.result is not None:
             return {**self.status(), 'event': None}
         k, rgbs = fr.get('keypoints'), fr.get('stickers')
-        if not (k and fr.get('confident') and rgbs and None not in rgbs) or fr.get('face_share', 1) < MIN_FACE_SHARE:
+        if k and fr.get('confident') and fr.get('view') == 'corner':
+            self._reset()
+            return {**self.status('Turn it so an edge points at the camera (tip up), not a corner: two faces in view.'),
+                    'event': None, 'refused': 'corner'}
+        if not (k and fr.get('confident') and rgbs and None not in rgbs and len(rgbs) == 18) \
+                or fr.get('face_share', 1) < MIN_FACE_SHARE:
             self._reset()
             return {**self.status(), 'event': None}
         k = np.asarray(k, float)
-        size = np.mean(np.linalg.norm(k[1:] - k[0], axis=1))
+        size = float(np.ptp(k, 0).max())
         gap = min(3.0, max(1.0, (now - self._last_time) / FRAME_GAP)) if self._last_time is not None else 1.0
         self._last_time = now
         if self._last_kpts is not None and np.max(np.linalg.norm(k - self._last_kpts, axis=1)) > MAX_MOVE * size * gap:
@@ -91,21 +96,21 @@ class ScanSession:
         self._buffer.append(rgbs)
         if len(self._buffer) < STEADY_FRAMES or now - self._steady_since < STEADY_SECONDS - 1e-6:
             return {**self.status(), 'event': None}
-        reading = [tuple(np.median([b[i] for b in self._buffer], axis=0)) for i in range(27)]
+        reading = [tuple(np.median([b[i] for b in self._buffer], axis=0)) for i in range(18)]
         self._reset()
         settling = self._captured_at is not None and now - self._captured_at < SETTLE_S
         if self.views == 0:
-            self._add(reading, HOLD_STICKERS[0])
+            self._add(reading, EDGE_HOLD_STICKERS[0])
             self._captured_at = now
-            return {**self.status('3 of 4 faces scanned. Now point another corner at the camera.'), 'event': 'captured'}
+            return {**self.status('2 of 4 faces scanned. Now turn it around to show the other two.'), 'event': 'captured'}
         outcome, stickers = self._place(reading)
         if outcome == 'unclear':
             return {**self.status(None if settling else
-                                  "Couldn't tell how the pyramid was turned. Hold it still, a corner toward the camera."),
+                                  "Couldn't tell how the pyramid was turned. Hold it still, an edge toward the camera."),
                     'event': None, 'refused': 'unclear'}
         if not any(i not in self.samples for i in stickers):
             return {**self.status(None if settling else
-                                  'Those faces are already scanned. Point another corner at the camera.'),
+                                  'Those faces are already scanned. Turn it around to show the other two.'),
                     'event': None, 'refused': 'nothing new'}
         self._add(reading, stickers)
         self._captured_at = now
@@ -121,17 +126,30 @@ class ScanSession:
         self.views += 1
 
     def _place(self, reading):
+        """('add', the 18 physical stickers of this view) or ('unclear', None)."""
         seen = np.array([color_feature(c) for c in reading])
         known = {i: np.array(color_feature(np.mean(v, axis=0))) for i, v in self.samples.items()}
-        fits = []
-        for stickers in HOLD_STICKERS:
-            shared = [j for j in range(27) if stickers[j] in known]
-            if len(shared) < 9:
-                continue
-            fits.append((float(np.mean([np.linalg.norm(seen[j] - known[stickers[j]]) for j in shared])), stickers))
+        fits, fresh = [], []
+        for stickers in EDGE_HOLD_STICKERS:
+            shared = [j for j in range(18) if stickers[j] in known]
+            if not shared:
+                fresh.append(stickers)
+            elif len(shared) >= 9:
+                fits.append((float(np.mean([np.linalg.norm(seen[j] - known[stickers[j]]) for j in shared])), stickers))
         fits.sort(key=lambda t: t[0])
-        if fits and fits[0][0] < MATCH_MAX and (len(fits) == 1 or fits[0][0] < MATCH_MARGIN * fits[1][0]):
-            return 'add', fits[0][1]
+        if fits and fits[0][0] < MATCH_MAX:      # faces seen before are in view: placed by their colours
+            if len(fits) == 1 or fits[0][0] < MATCH_MARGIN * fits[1][0]:
+                return 'add', fits[0][1]
+            return 'unclear', None
+        if len(fresh) == 2 and len(known) == 18:  # the other two faces: which way round, by decoding both
+            costs = []
+            for stickers in fresh:
+                rgbs = {i: np.mean(v, axis=0) for i, v in self.samples.items()}
+                rgbs.update(zip(stickers, reading))
+                costs.append((name_colours([tuple(rgbs[i]) for i in range(36)])['cost'], stickers))
+            costs.sort(key=lambda t: t[0])
+            if costs[0][0] < TURN_MARGIN * costs[1][0]:
+                return 'add', costs[0][1]
         return 'unclear', None
 
     def _reset(self):

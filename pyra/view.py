@@ -83,11 +83,12 @@ def view_stickers(hold):
 HOLD_STICKERS = [view_stickers(h) for h in HOLDS]
 
 
-def sticker_polygons(kpts, shrink=0.5):
-    """27 image triangles (the middle part of each sticker, `shrink` of its size) from the 4 corner points."""
+def sticker_polygons(kpts, shrink=0.5, kind='corner'):
+    """Image triangles of the stickers in view (the middle part of each, `shrink` of its size) from the
+    4 corner points: 27 for a corner-on view, 18 for an edge-on one."""
     k = np.asarray(kpts, float)
     polys = []
-    for vf in VIEW_FACES:
+    for vf in VIEWS[kind]:
         P = k[list(vf)]
         for tri in LAYOUT:
             pts = tri @ P
@@ -96,11 +97,11 @@ def sticker_polygons(kpts, shrink=0.5):
     return polys
 
 
-def read_stickers(frame, kpts, shrink=0.5):
-    """frame: BGR. Returns 27 (r, g, b) medians (None where off the picture), in view_stickers order."""
+def read_stickers(frame, kpts, shrink=0.5, kind='corner'):
+    """frame: BGR. Returns (r, g, b) medians (None where off the picture), in view_stickers order."""
     h, w = frame.shape[:2]
     out = []
-    for poly in sticker_polygons(kpts, shrink):
+    for poly in sticker_polygons(kpts, shrink, kind):
         x0, y0 = np.floor(poly.min(0)).astype(int)
         x1, y1 = np.ceil(poly.max(0)).astype(int) + 1
         x0, y0, x1, y1 = max(x0, 0), max(y0, 0), min(x1, w), min(y1, h)
@@ -118,20 +119,63 @@ def read_stickers(frame, kpts, shrink=0.5):
     return out
 
 
-def face_share(kpts):
-    """Smallest picture face's area over the largest's (1 = held squarely corner-on)."""
+def face_share(kpts, kind='corner'):
+    """Smallest picture face's area over the largest's (1 = held squarely corner-on or edge-on)."""
     k = np.asarray(kpts, float)
 
     def area(idx):
         q = k[list(idx)]
         (ax, ay), (bx, by) = q[1] - q[0], q[2] - q[0]
         return abs(ax * by - ay * bx) / 2
-    a = [area(vf) for vf in VIEW_FACES]
+    a = [area(vf) for vf in VIEWS[kind]]
     return min(a) / max(max(a), 1e-9)
 
 
-__all__ = ['HOLDS', 'HOLD_STICKERS', 'VIEW_FACES', 'clockwise_from_outside', 'face_share', 'read_stickers',
-           'sticker_polygons', 'view_stickers', 'itertools']
+# ---- edge-on views: an edge pointing at the camera, two whole faces in view ----------------------
+# Keypoints: 0 and 1 the two ends of the near edge (0 the higher one on screen), 2 the far corner on
+# the left of the line 0 -> 1 (cross product > 0 in picture coordinates, y down), 3 the other far
+# corner. Mirroring left-right keeps 0 and 1 and swaps 2 and 3 (flip_idx [0, 1, 3, 2], as corner-on).
+# The two faces in the picture are (k0, k1, k2) and (k0, k1, k3); the other two are hidden.
+EDGE_VIEW_FACES = ((0, 1, 2), (0, 1, 3))
+
+
+def edge_holds():
+    """All 12 edge-on holds as [near-edge end at k0, at k1, far corner at k2, at k3]."""
+    out = []
+    for a in 'ULRB':
+        for b in 'ULRB':
+            if a == b:
+                continue
+            m = CORNERS[a] + CORNERS[b]
+            m = m / np.linalg.norm(m)                       # toward the camera
+            up = CORNERS[a] - CORNERS[b]
+            up = up - m * np.dot(up, m)                     # k0 above k1
+            right = np.cross(-m, up)                        # the camera looks along -m
+            far = [c for c in 'ULRB' if c not in (a, b)]
+            left = min(far, key=lambda c: np.dot(CORNERS[c], right))
+            out.append([a, b, left, next(c for c in far if c != left)])
+    return out
+
+
+EDGE_HOLDS = edge_holds()
+VIEWS = {'corner': VIEW_FACES, 'edge': EDGE_VIEW_FACES}
+
+
+def view_stickers_of(hold, kind):
+    """Physical sticker indices of the picture stickers for a hold of either kind (27 or 18)."""
+    out = []
+    for vf in VIEWS[kind]:
+        out += _physical_sticker([hold[i] for i in vf])
+    return out
+
+
+EDGE_HOLD_STICKERS = [view_stickers_of(h, 'edge') for h in EDGE_HOLDS]
+HOLDS_OF = {'corner': (HOLDS, HOLD_STICKERS), 'edge': (EDGE_HOLDS, EDGE_HOLD_STICKERS)}
+
+
+__all__ = ['EDGE_HOLDS', 'EDGE_HOLD_STICKERS', 'EDGE_VIEW_FACES', 'HOLDS', 'HOLDS_OF', 'HOLD_STICKERS', 'VIEWS',
+           'VIEW_FACES', 'clockwise_from_outside', 'face_share', 'read_stickers', 'sticker_polygons', 'view_stickers',
+           'view_stickers_of', 'itertools']
 
 
 def frame_permutation(rename):

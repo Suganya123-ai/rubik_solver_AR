@@ -21,7 +21,7 @@ from .view import face_share, read_stickers
 
 log = logging.getLogger('rubik.pyra')
 MODELS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
-MODEL_PATH = os.environ.get('PYRA_MODEL') or os.path.join(MODELS, 'pyra_pose_v2.pt')
+MODEL_PATH = os.environ.get('PYRA_MODEL') or os.path.join(MODELS, 'pyra_pose_v3.pt')
 CONFIDENT = 0.5
 MAX_FRAME_BYTES = 2_000_000
 _detector = None
@@ -43,19 +43,34 @@ def detector():
     return _detector
 
 
+def detect(frame, min_confidence=0.25):
+    """(4 corner points, confidence, view kind) of the most confident pyramid, or None. The kind is
+    'edge' (an edge toward the camera, class 1) or 'corner' (class 0; the only one older models know)."""
+    d = detector()
+    r = d.model.predict(frame, imgsz=640, device=d.device, verbose=False)[0]
+    if r.keypoints is None or len(r.boxes) == 0:
+        return None
+    best = int(r.boxes.conf.argmax())
+    conf = float(r.boxes.conf[best])
+    if conf < min_confidence:
+        return None
+    kind = 'edge' if len(d.model.names) > 1 and int(r.boxes.cls[best]) == 1 else 'corner'
+    return r.keypoints.xy[best].cpu().numpy().astype(np.float32), conf, kind
+
+
 def process_frame(jpeg):
     t0 = time.perf_counter()
     frame = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
         raise ValueError('not a decodable image')
     h, w = frame.shape[:2]
-    found = detector().detect(frame)
+    found = detect(frame)
     out = {'type': 'frame', 'width': w, 'height': h, 'keypoints': None, 'confidence': None, 'confident': False,
-           'stickers': None, 'face_share': None}
+           'stickers': None, 'face_share': None, 'view': None}
     if found is not None:
-        k, conf = found
-        out.update(keypoints=k.round(1).tolist(), confidence=round(conf, 3), confident=conf >= CONFIDENT,
-                   stickers=read_stickers(frame, k), face_share=round(face_share(k), 3))
+        k, conf, kind = found
+        out.update(keypoints=k.round(1).tolist(), confidence=round(conf, 3), confident=conf >= CONFIDENT, view=kind,
+                   stickers=read_stickers(frame, k, kind=kind), face_share=round(face_share(k, kind), 3))
     out['ms'] = round((time.perf_counter() - t0) * 1000, 1)
     return out
 

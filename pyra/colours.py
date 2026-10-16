@@ -134,4 +134,4 @@ def name_colours(rgbs, valid=None):
     colour_of = {L: min(NAMES, key=lambda n: np.linalg.norm(np.array(color_feature(NAMES[n])) - centres[g]))
                  for L, g in group_of.items()}
     return {'state': state, 'valid': True, 'doubtful': doubtful, 'colour_of': colour_of,
-            'confidence': float(second - total), 'group_features': centres}
+            'confidence': float(second - total), 'cost': float(total), 'group_features': centres}

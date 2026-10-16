@@ -165,3 +165,66 @@ def _palm(img, corners2d, rng):
                 angle, 0, 360, col, -1, cv2.LINE_AA)
     cv2.line(img, tuple(int(v) for v in centre), tuple(int(v) for v in centre + d * radius * 2.5), col,
              int(radius * 0.9), cv2.LINE_AA)
+
+
+# ---- edge-on: an edge pointing at the camera, two whole faces in view (see pyra/view.py) ----------
+
+def _axis_rot(axis, deg):
+    t = math.radians(deg)
+    c, s = math.cos(t), math.sin(t)
+    if axis == 'x':
+        return np.array([[1, 0, 0], [0, c, -s], [0, s, c]])
+    if axis == 'y':
+        return np.array([[c, 0, s], [0, 1, 0], [-s, 0, c]])
+    return np.array([[c, -s, 0], [s, c, 0], [0, 0, 1]])
+
+
+def edge_on_pose(rng, edge=None, tilt_max=30, spin_max=50, far=False, natural_p=0.5):
+    """A random hold with edge (a, b) toward the camera, a above b on screen.
+    Natural (natural_p of the time): standing on its base with the tip a up and corner b toward the
+    camera, seen from 5-40 degrees above, as people hold it (~35 degrees off square edge-on).
+    Otherwise: square edge-on tilted up to tilt_max degrees, the near edge within spin_max of upright."""
+    a, b = edge or tuple(rng.choice(list('ULRB'), 2, replace=False))
+    if rng.uniform() < natural_p:
+        Rm = _rotation_to(-CORNERS[a] / np.linalg.norm(CORNERS[a]), np.array([0.0, -1.0, 0.0]))   # base down
+        vb = Rm @ CORNERS[b]
+        Rm = _axis_rot('y', -math.degrees(math.atan2(vb[0], vb[2])) + rng.uniform(-25, 25)) @ Rm  # b toward the camera
+        Rm = _axis_rot('z', rng.uniform(-15, 15)) @ _axis_rot('x', rng.uniform(5, 40)) @ Rm      # seen from above, a little roll
+    else:
+        m = (CORNERS[a] + CORNERS[b]) / np.linalg.norm(CORNERS[a] + CORNERS[b])
+        tilt = math.radians(rng.uniform(0, tilt_max))
+        phi = rng.uniform(0, 2 * math.pi)
+        target = np.array([math.sin(tilt) * math.cos(phi), math.sin(tilt) * math.sin(phi), math.cos(tilt)])
+        Rm = _rotation_to(m, target)
+        e = Rm @ (CORNERS[a] - CORNERS[b])
+        spin = math.pi / 2 - math.atan2(e[1], e[0]) + math.radians(rng.uniform(-spin_max, spin_max))
+        Rm = _axis_rot('z', math.degrees(spin)) @ Rm
+    size_px = rng.uniform(50, 150) if far else rng.uniform(150, 420)
+    dist = R.FOCAL * 1.6 * SCALE / size_px + SCALE
+    lim = (0.45, 0.35) if far else (0.28, 0.2)
+    t = (rng.uniform(-lim[0], lim[0]), rng.uniform(-lim[1], lim[1]))
+    return (a, b), R.Pose(Rm, (t[0] * dist, t[1] * dist, -dist))
+
+
+def edge_keypoints(pose, edge):
+    """The 4 corners in the picture for an edge-on view: 0, 1 the near edge's ends (0 the higher),
+    2 the far corner left of the line 0 -> 1 (cross product > 0, y down), 3 the other. And their names."""
+    a, b = edge
+    pa, pb = pose.project(CORNERS[a] * SCALE), pose.project(CORNERS[b] * SCALE)
+    if pb[1] < pa[1]:
+        (a, pa), (b, pb) = (b, pb), (a, pa)
+    far = [c for c in 'ULRB' if c not in (a, b)]
+    pts = {c: pose.project(CORNERS[c] * SCALE) for c in far}
+    d = pb - pa
+    cross = lambda c: d[0] * (pts[c][1] - pa[1]) - d[1] * (pts[c][0] - pa[0])   # noqa: E731
+    left = max(far, key=cross)
+    right = next(c for c in far if c != left)
+    return np.float32([pa, pb, pts[left], pts[right]]), [a, b, left, right]
+
+
+def valid_edge_view(pose, edge, min_facing=0.15, back_max=0.0):
+    """The two faces on the near edge show, the other two don't (or barely: up to back_max, when it is
+    seen from about level with its base)."""
+    front = [f for f in FACES if OPPOSITE[f] not in edge]
+    back = [f for f in FACES if OPPOSITE[f] in edge]
+    return min(visible(pose, f) for f in front) >= min_facing and max(visible(pose, f) for f in back) < back_max
