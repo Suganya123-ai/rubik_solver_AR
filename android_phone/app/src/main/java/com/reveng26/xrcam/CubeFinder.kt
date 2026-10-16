@@ -35,7 +35,7 @@ class CubeFinder(
     class Found(val points: FloatArray, val confidence: Float)   // 7 corners: x0, y0, x1, y1, ...
 
     companion object {
-        const val DEFAULT_MODEL = "cube_pose_v3_256.onnx"
+        const val DEFAULT_MODEL = "cube_pose_v3_256_int8.onnx"   // Beam Pro: 11 ms a look (4 threads), the old model 26
         /** files/finder.txt as key=value pairs (empty if there is none). */
         fun tuning(context: Context): Map<String, String> = try {
             java.io.File(context.filesDir, "finder.txt").readText().split(Regex("\\s+")).filter { "=" in it }
