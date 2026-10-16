@@ -9,7 +9,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.cubetutor.phone"   // installs beside the bridge app (com.cubetutor.bridge)
+        applicationId = "com.cubetutor.phonefast"   // its own app: installs beside the demo (com.cubetutor.phone) and the bridge app
         minSdk = 28
         targetSdk = 35
         versionCode = 1

@@ -36,7 +36,7 @@
             android:name=".CameraActivity"
             android:exported="false"
             android:launchMode="singleTask"
-            android:taskAffinity="com.cubetutor.phone.tutor"
+            android:taskAffinity="com.cubetutor.phonefast.tutor"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|density|keyboard|keyboardHidden|navigation|uiMode|colorMode|fontScale|layoutDirection"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.XRCam.Fullscreen" />

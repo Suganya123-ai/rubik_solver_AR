@@ -15,8 +15,8 @@ import java.nio.ByteBuffer
  * Tries every part of the phone-only tutor without the glasses, on a saved
  * picture, and writes the timings to the log (tag SelfTest):
  *
- *   adb shell "run-as com.cubetutor.phone sh -c 'cat > files/test.jpg'" < some_frame.jpg
- *   adb shell am start -n com.cubetutor.phone/com.reveng26.xrcam.MainActivity --ez selftest true
+ *   adb shell "run-as com.cubetutor.phonefast sh -c 'cat > files/test.jpg'" < some_frame.jpg
+ *   adb shell am start -n com.cubetutor.phonefast/com.reveng26.xrcam.MainActivity --ez selftest true
  *   adb logcat -s SelfTest
  */
 object SelfTest {

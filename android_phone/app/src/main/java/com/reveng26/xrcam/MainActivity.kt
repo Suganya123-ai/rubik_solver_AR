@@ -126,7 +126,7 @@ class MainActivity : AppCompatActivity(), GlassesConnection.Listener {
             // "autostart": the tutor screen asks for this when the glasses' camera went away (it switches
             // the camera on again). Also handy from a computer, where taps don't reach the app while
             // the glasses are in use:
-            // adb shell am start -n com.cubetutor.phone/com.reveng26.xrcam.MainActivity --ez autostart true
+            // adb shell am start -n com.cubetutor.phonefast/com.reveng26.xrcam.MainActivity --ez autostart true
             if (intent?.getBooleanExtra("autostart", false) == true) {
                 intent.removeExtra("autostart")
                 launchCamera()

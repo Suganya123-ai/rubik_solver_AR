@@ -60,7 +60,7 @@ class TutorEngine(
             it.start(0, true)   // 0: connections never time out (the page's link is quiet between commands)
             shared = it
         }
-        const val PORT = 5273
+        const val PORT = 5283   // not 5273: the demo app (com.cubetutor.phone) may still be serving there
         const val WIDTH = 640
         const val HEIGHT = 472          // the camera is 2048x1512
         private const val QUALITY = 60
