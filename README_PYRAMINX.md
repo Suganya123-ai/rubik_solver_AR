@@ -39,7 +39,7 @@ Keys: `S` scan, `Enter` confirm/solve, `→` "I did it", `N` new plan, `Esc` sto
 |---|---|---|
 | Geometry and moves | The 36 stickers in 3D; each move worked out by rotating them about a corner (WCA notation, tips included) | `pyra/geometry.py`, `pyra/model.py` |
 | **Solver** | A table of **every** position's distance to solved (933,120, built in ~4 s, matches the published distribution exactly: God's number 11). Solutions are always the **shortest**; of the equally short ones, the **easiest to follow** (fewest changes of corner); tips last. Checked against [PyraminXolver](https://github.com/Odder/PyraminXolver) on 300 scrambles: same length every time | `pyra/solver.py` |
-| Finding the pyramid | A YOLO pose model (4 corners: the near one, then clockwise from the highest), fine-tuned from the cube model on 6,000 rendered pictures (angles, near and far, hands, blur, light, empty pictures) | `bench/render_pyra.py`, `bench/make_pyra_data.py`, `bench/run_pyra_training.sh`, `models/pyra_pose_v1.pt` |
+| Finding the pyramid | A YOLO pose model (4 corners: the near one, then clockwise from the highest), fine-tuned from the cube model on 6,000 rendered pictures (v1), then trained further on very unclear pictures, pyramids in real hands and 3x3 cubes as counter-examples (v2, see below) | `bench/render_pyra.py`, `bench/make_pyra_data.py`, `bench/make_pyra_hard.py`, `bench/make_pyra_real_hands.py`, `bench/run_pyra_training.sh`, `bench/run_pyra_training_v2.sh`, `models/pyra_pose_v2.pt` |
 | Reading stickers | The 4 corners place the three faces; each of the 27 stickers in view is the median of its middle | `pyra/view.py` |
 | Scan | Views from any corner; each new one is placed by the colours it shares with what is scanned; stickers seen twice are averaged | `pyra/scan.py` |
 | **Colours** | Grouped into 4 x 9 by hue, then **the possible position (933,120 x 81 tip turns) that best matches all 36 colours**: a finger or glare on a few stickers can't give an impossible puzzle; corrected pieces are highlighted | `pyra/colours.py` |
@@ -53,18 +53,46 @@ Keys: `S` scan, `Enter` confirm/solve, `→` "I did it", `N` new plan, `Esc` sto
   solves with a deliberate wrong move (14 Oct 2026: scans 45/45, wrong move caught 42/45, no false
   "wrong move" calls).
 - `cd bench && PYTHONPATH=.. python make_pyra_video.py out.y4m`: a test video for Chrome's fake camera
-  (scan, a wrong move and its undo, the solve). With `models/pyra_pose_v1.pt` (16 Oct 2026): scanned
-  (3 stickers to check), wrong move caught and undone, 8 moves followed, solved.
+  (scan, a wrong move and its undo, the solve). With `models/pyra_pose_v2.pt` (16 Oct 2026): scanned
+  (12 stickers highlighted to check, all read right; v1 highlighted 3), wrong move caught and undone,
+  8 moves followed, solved.
 
-The pyramid finder (`models/pyra_pose_v1.pt`, 15 passes, ~1h40 on an M1 Pro), on 600 rendered test
-pictures it never trained on: pyramids found 479 of 481 (99.6%); corners within 2.5% of its size
-(median), 6.4% (90th percentile); no pyramid imagined in 119 empty pictures or plain frames.
+### The pyramid finder
+
+**v1** (`models/pyra_pose_v1.pt`, 15 passes, ~1h40 on an M1 Pro): 6,000 rendered pictures.
+
+**v2** (`models/pyra_pose_v2.pt`, the one the app uses; v1 trained 10 more passes): adds
+- 2,500 pyramids in the hardest conditions (heavy blur and motion, very dark or bright, colour casts,
+  noise, strong compression, up to four fingers across, steep angles) and 1,000 rendered 3x3 cubes
+  marked "not a pyramid" (`make_pyra_hard.py`);
+- **pyramids in real hands**: real frames from the cube apps' recordings (your hands, real light, the
+  webcam and glasses cameras); the cube is painted out, a pyramid is drawn in its place and the real
+  fingers in front of it are put back; the original frames are kept as "not a pyramid"
+  (`make_pyra_real_hands.py`, ~1,700 pictures);
+- half of v1's renders, so it doesn't forget them.
+
+On test pictures neither model trained on (16 Oct 2026):
+
+| Test | v1 | v2 |
+|---|---|---|
+| Original renders: found / corner error (median) | 99.6% / 2.5% | 99.8% / 2.6% |
+| Very unclear renders: found / corner error | 98.8% / 3.5% | 99.6% / 3.2% |
+| Pyramids in real hands: found / corner error | 100% / 1.8% | 100% / 1.7% |
+| Rendered cubes taken for a pyramid | 98 of 100 | 0 of 100 |
+| Real cube frames taken for a pyramid | 53 of 62 | 0 of 62 |
+| Other unseen cubes (110 real, 200 rendered) taken for a pyramid | 264 of 310 | 60 of 310 |
+| Empty pictures with a pyramid imagined | 0 of 119 | 0 of 119 |
+
+Open-source photos: very few usable ones exist. Wikimedia Commons gave 22 (most of them other
+puzzles or diagrams; 2 real Pyraminx photos, v2 finds 1); Openverse was unreachable; the 11k Hands
+dataset was not used (academic use only). Those 22 are only used for testing.
 
 ## Not done yet
 
-- Trained on rendered pyramids only: real frames from your puzzle (the app can record them) would
-  make finding it more reliable, as they did for the cube.
-- It takes most pictures of a 3x3 cube for a pyramid (33 of 40): it never saw a cube while
-  training. Adding cube pictures as counter-examples would fix that.
+- The pyramids it trained on are drawn, even the ones in real hands: real frames from your own
+  puzzle (the app can record them) would make finding it more reliable, as they did for the cube.
+- A 3x3 cube is still taken for a pyramid in about 1 picture in 5 it has never seen (was 6 in 7).
+- On the test video it highlights more stickers to check than v1 (12 against 3), though it reads them
+  right; real frames should show whether that holds on a real puzzle.
 - No hand masking: fingers on stickers are handled by the colour decoding and by waiting for still,
   clear views.

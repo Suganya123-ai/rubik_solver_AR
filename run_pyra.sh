@@ -10,7 +10,7 @@ if [ -z "$PY" ]; then
   elif [ -x ../rubik_solver_AR/.venv/bin/python ]; then PY=../rubik_solver_AR/.venv/bin/python  # share the demo's environment
   else python3 -m venv .venv && .venv/bin/pip install -q -r requirements.txt && PY=.venv/bin/python; fi
 fi
-[ -f models/pyra_pose_v1.pt ] || { echo "models/pyra_pose_v1.pt is missing: train it with bench/run_pyra_training.sh"; exit 1; }
+[ -f models/pyra_pose_v2.pt ] || { echo "models/pyra_pose_v2.pt is missing: train it with bench/run_pyra_training.sh (v1) then bench/run_pyra_training_v2.sh"; exit 1; }
 [ -d web/node_modules ] || (cd web && npm install)
 "$PY" -m uvicorn main_pyra:app --host 127.0.0.1 --port "${VISION_PORT:-8102}" &
 SERVER=$!

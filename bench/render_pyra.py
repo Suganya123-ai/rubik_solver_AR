@@ -93,11 +93,14 @@ def _sticker_poly(i, inset):
     return c + (tri - c) * inset
 
 
-def render(state, pose, rng, level='normal', style='stickered', bg_photo=None, hand='hand'):
+def render(state, pose, rng, level='normal', style='stickered', bg_photo=None, hand='hand', background=None,
+           out_mask=None):
+    """background: a 640x480 picture to draw on exactly as it is (no crop, no drawn hand);
+    out_mask: a list that receives the puzzle's silhouette (to put real fingers back on top)."""
     cfg = R.LEVELS[level]
     pal = palette(rng, style)
-    img = R.background(rng, bg_photo)
-    holding = hand == 'hand' and rng.uniform() < 0.75
+    img = background.astype(np.float32).copy() if background is not None else R.background(rng, bg_photo)
+    holding = background is None and hand == 'hand' and rng.uniform() < 0.75
     corners2d = np.float32([pose.project(CORNERS[c] * SCALE) for c in 'ULRB'])
     if holding:
         _palm(img, corners2d, rng)
@@ -131,7 +134,9 @@ def render(state, pose, rng, level='normal', style='stickered', bg_photo=None, h
                 cv2.ellipse(blob, (int(xs[j]), int(ys[j])), (int(rng.uniform(8, 30)), int(rng.uniform(5, 18))),
                             rng.uniform(0, 180), 0, 360, 1.0, -1)
                 img += cv2.GaussianBlur(blob, (0, 0), rng.uniform(4, 9))[..., None] * 255 * rng.uniform(0.2, cfg['glare_max'])
-    if holding or rng.uniform() < cfg['hand_p']:
+    if out_mask is not None:
+        out_mask.append(silhouette.copy())
+    if background is None and (holding or rng.uniform() < cfg['hand_p']):
         R.add_fingers(img, silhouette, rng)
     session = R.new_session(rng, level)
     img = img * session['wb'][::-1] * session['gain']

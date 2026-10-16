@@ -21,7 +21,7 @@ from .view import face_share, read_stickers
 
 log = logging.getLogger('rubik.pyra')
 MODELS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models')
-MODEL_PATH = os.environ.get('PYRA_MODEL') or os.path.join(MODELS, 'pyra_pose_v1.pt')
+MODEL_PATH = os.environ.get('PYRA_MODEL') or os.path.join(MODELS, 'pyra_pose_v2.pt')
 CONFIDENT = 0.5
 MAX_FRAME_BYTES = 2_000_000
 _detector = None
