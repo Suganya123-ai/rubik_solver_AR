@@ -70,17 +70,19 @@ object SelfTest {
             Log.i(TAG, "page: HTTP ${page.responseCode}, ${page.inputStream.use { it.readBytes().size }} bytes")
             server.stop()
             finder.close()
-            // Every other model file pushed to files/ (name_SIZE.onnx), to compare sizes.
-            val candidates = (context.filesDir.listFiles { f -> f.name.endsWith(".onnx") } ?: arrayOf()).sortedBy { it.name }
+            // Every model file in the app (assets/models) and any pushed to files/, to compare them on this phone.
+            val bundled = (context.assets.list("models") ?: arrayOf()).filter { it.endsWith(".onnx") }.map { name ->
+                java.io.File(context.cacheDir, name).also { out -> context.assets.open("models/$name").use { i -> out.outputStream().use { i.copyTo(it) } } }
+            }
+            val candidates = (bundled + (context.filesDir.listFiles { f -> f.name.endsWith(".onnx") } ?: arrayOf())).sortedBy { it.name }
             for (file in candidates) {
                 try {
-                    val size = Regex("_(\\d+)").find(file.name)!!.groupValues[1].toInt()
-                    val f = CubeFinder(context, file, size)
+                    val f = CubeFinder(context, file)
                     repeat(4) { f.find(frame) }
                     f.prepareNs = 0; f.modelNs = 0; f.runs = 0
                     var last: CubeFinder.Found? = null
                     repeat(20) { last = f.find(frame) }
-                    Log.i(TAG, "%s: prepare %.1f ms, model %.1f ms per run, confidence %.2f".format(file.name,
+                    Log.i(TAG, "%s (%d px): prepare %.1f ms, model %.1f ms per run, confidence %.2f".format(file.name, f.SIZE,
                         f.prepareNs / 1e6 / f.runs, f.modelNs / 1e6 / f.runs, last?.confidence ?: 0f))
                     f.close()
                 } catch (e: Throwable) {

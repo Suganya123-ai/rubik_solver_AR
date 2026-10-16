@@ -68,3 +68,19 @@ def test_java_solver_stands_in_for_kociemba():
             pass
     finally:
         solver.kociemba = before
+
+
+def test_corner_follower_moves_the_corners_with_the_cube():
+    """vision/phone.py CornerFollower: the picture moves a few pixels; the 7 corners move with it."""
+    import cv2
+    from vision.phone import CornerFollower
+    rng = np.random.default_rng(0)
+    img = cv2.GaussianBlur((rng.uniform(0, 255, (472, 640)) > 200).astype(np.uint8) * 255, (0, 0), 1.5)
+    kpts = np.float32([[320, 236], [250, 190], [320, 140], [390, 190], [390, 280], [320, 330], [250, 280]])
+    f = CornerFollower()
+    f.seen(img, kpts, 0.9)
+    shift = np.float32([6.0, -4.0])
+    moved = cv2.warpAffine(img, np.float32([[1, 0, shift[0]], [0, 1, shift[1]]]), (640, 472))
+    out = f.follow(moved)
+    assert out is not None and np.abs(out - (kpts + shift)).max() < 0.5
+    assert f.follow(np.zeros_like(img)) is None          # nothing to follow: give up (the model runs next)

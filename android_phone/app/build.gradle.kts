@@ -57,7 +57,7 @@ val syncTutorPython by tasks.registering(Sync::class) {
 val syncTutorAssets by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("tutorAssets"))
     from(File(repo, "web/dist")) { into("web") }
-    from(File(repo, "models")) { include("cube_pose_320.onnx"); into("models") }
+    from(File(repo, "models")) { include("cube_pose_v3_256.onnx", "cube_pose_v3_256_int8.onnx", "cube_pose_320.onnx"); into("models") }
     doFirst {
         check(File(repo, "web/dist/index.html").isFile) { "web/dist is missing: run `npm install && npm run build` in web/" }
     }

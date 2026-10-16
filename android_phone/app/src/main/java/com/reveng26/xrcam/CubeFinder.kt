@@ -17,10 +17,10 @@ import java.nio.FloatBuffer
 /**
  * Finds the cube and its 7 corner points in a picture, on the phone.
  *
- * The same model the laptop uses (models/cube_pose_v2.pt), converted to ONNX
- * at 320x320 and run by ONNX Runtime. At that size it takes a quarter of the
- * work of the laptop's 640, but its corner points are too coarse on a whole
- * frame. So it looks twice as closely where it matters: once the cube has
+ * The same model the laptop uses (models/cube_pose_v3.pt), converted to ONNX
+ * at 256x256 (models/cube_pose_v3_256.onnx; the size is read from the file)
+ * and run by ONNX Runtime. At that size it takes a sixth of the work of the
+ * laptop's 640, but its corner points are too coarse on a whole frame. So it looks twice as closely where it matters: once the cube has
  * been found, only a square around it is given to the model, where the cube
  * fills the picture (as it did in the model's training pictures) and the
  * corners come out sharp. The whole frame is searched only when the cube is
@@ -28,14 +28,19 @@ import java.nio.FloatBuffer
  */
 class CubeFinder(
     context: Context,
-    /** Another model file to try instead of the bundled one, and the picture size it was exported at (SelfTest). */
+    /** Another model file to try instead of the bundled one (SelfTest). */
     modelFile: java.io.File? = null,
-    private val SIZE: Int = 320,
 ) {
 
     class Found(val points: FloatArray, val confidence: Float)   // 7 corners: x0, y0, x1, y1, ...
 
     companion object {
+        const val DEFAULT_MODEL = "cube_pose_v3_256.onnx"
+        /** files/finder.txt as key=value pairs (empty if there is none). */
+        fun tuning(context: Context): Map<String, String> = try {
+            java.io.File(context.filesDir, "finder.txt").readText().split(Regex("\\s+")).filter { "=" in it }
+                .associate { it.substringBefore("=") to it.substringAfter("=") }
+        } catch (_: Exception) { emptyMap() }
         private const val KEEP = 0.5f      // keep following the cube while the model is at least this sure
         private const val MIN = 0.25f      // below this: nothing found
         private const val AROUND = 1.5f    // the square given to the model: this many times the cube's size
@@ -44,14 +49,20 @@ class CubeFinder(
     private val env = OrtEnvironment.getEnvironment()
     private val session: OrtSession
     private val inputName: String
-    private val square = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
-    private val canvas = Canvas(square)
+    /** The model's picture size (its input is 1 x 3 x SIZE x SIZE). */
+    val SIZE: Int
+    /** Which model file is in use (assets/models/, or files/finder.txt "model=..."). */
+    val modelName: String
+    private val square: Bitmap
+    private val canvas: Canvas
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG)
-    private val pixels = IntArray(SIZE * SIZE)
-    private val values = FloatArray(3 * SIZE * SIZE)
-    private val input: FloatBuffer =
-        ByteBuffer.allocateDirect(3 * SIZE * SIZE * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+    private val pixels: IntArray
+    private val values: FloatArray
+    private val input: FloatBuffer
     private var around: RectF? = null     // where the cube was, in the frame's pixels
+
+    /** The cube is being followed: the next look is a close one around it. */
+    val following: Boolean get() = around != null
     /** How long the model took on the last frame, in ms. */
     var lastMs = 0L
         private set
@@ -60,12 +71,11 @@ class CubeFinder(
     var runs = 0
 
     init {
-        val model = modelFile?.readBytes() ?: context.assets.open("models/cube_pose_320.onnx").use { it.readBytes() }
-        // Tuning, without rebuilding: files/finder.txt may hold e.g. "threads=2 spin=0" (SelfTest / adb).
-        val tuning = try {
-            java.io.File(context.filesDir, "finder.txt").readText().split(Regex("\\s+")).filter { "=" in it }
-                .associate { it.substringBefore("=") to it.substringAfter("=") }
-        } catch (_: Exception) { emptyMap() }
+        // Tuning, without rebuilding: files/finder.txt may hold e.g. "threads=2 spin=0 model=cube_pose_v3_256_int8.onnx"
+        // (SelfTest / adb).
+        val tuning = tuning(context)
+        modelName = modelFile?.name ?: (tuning["model"] ?: DEFAULT_MODEL)
+        val model = modelFile?.readBytes() ?: context.assets.open("models/$modelName").use { it.readBytes() }
         val options = OrtSession.SessionOptions().apply {
             // 4 threads on the processor: 26 ms a look on the Beam Pro on its own. Its neural accelerator
             // (NNAPI) was 9 times slower with this model, and more threads than big cores was slower too.
@@ -74,10 +84,27 @@ class CubeFinder(
             // Threads that wait by spinning keep a core busy; with the glasses' own software and the
             // camera decoder also running, letting them sleep leaves those cores to the others.
             addConfigEntry("session.intra_op.allow_spinning", tuning["spin"] ?: "1")
+            // Other engines to try on the phone (files/finder.txt): "nnapi=1" the phone's neural engine
+            // (Android NNAPI: best with an 8-bit model), "xnnpack=1" a faster processor engine for 8-bit
+            // models. Either falls back to the processor for what it can't run.
+            if (tuning["nnapi"] == "1") addNnapi()
+            if (tuning["xnnpack"] == "1") addXnnpack(mapOf("intra_op_num_threads" to (tuning["threads"] ?: "4")))
         }
-        android.util.Log.i("CubeFinder", "threads=${tuning["threads"] ?: 4} spin=${tuning["spin"] ?: "1"}")
         session = env.createSession(model, options)
         inputName = session.inputNames.first()
+        SIZE = ((session.inputInfo[inputName]!!.info as ai.onnxruntime.TensorInfo).shape[2]).toInt()
+        square = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
+        canvas = Canvas(square)
+        pixels = IntArray(SIZE * SIZE)
+        values = FloatArray(3 * SIZE * SIZE)
+        input = ByteBuffer.allocateDirect(3 * SIZE * SIZE * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        android.util.Log.i("CubeFinder", "model=$modelName size=$SIZE threads=${tuning["threads"] ?: 4} spin=${tuning["spin"] ?: "1"} " +
+            "nnapi=${tuning["nnapi"] ?: 0} xnnpack=${tuning["xnnpack"] ?: 0}")
+    }
+
+    /** The cube was followed to these corners (TutorEngine, between looks): look around them next. */
+    fun followTo(points: FloatArray?) {
+        around = points?.let { squareAround(Found(it, 1f), null) }
     }
 
     fun find(frame: Bitmap): Found? {
@@ -97,7 +124,7 @@ class CubeFinder(
         return result
     }
 
-    private fun squareAround(found: Found, frame: Bitmap): RectF {
+    private fun squareAround(found: Found, @Suppress("UNUSED_PARAMETER") frame: Bitmap?): RectF {
         var x0 = Float.MAX_VALUE; var y0 = Float.MAX_VALUE; var x1 = -Float.MAX_VALUE; var y1 = -Float.MAX_VALUE
         for (i in 0 until 7) {
             x0 = minOf(x0, found.points[2 * i]); x1 = maxOf(x1, found.points[2 * i])

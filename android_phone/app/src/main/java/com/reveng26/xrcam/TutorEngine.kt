@@ -16,11 +16,17 @@ import java.nio.ByteBuffer
 /**
  * The whole tutor on the phone: no laptop, no network.
  *
- * For each camera frame, on its own thread:
- *   1. a window of the glasses' wide camera picture is cut out (640x472),
- *   2. the cube finder (CubeFinder, ONNX Runtime) gives the 7 corner points,
+ * For each camera frame:
+ *   1. a window of the glasses' wide camera picture is cut out (640x472), on
+ *      the decoder's thread, into one of two buffers: the next frame is cut
+ *      while the last one is still being worked on;
+ *   2. the cube finder (CubeFinder, ONNX Runtime) gives the 7 corner points;
+ *      while it follows the cube it runs only every [modelEvery]-th frame, and
+ *      in between the corners are followed from the last frame (vision/phone.py
+ *      CornerFollower: much cheaper); if following fails, the model runs on the
+ *      next frame;
  *   3. the tutor's Python code (vision/phone.py, through Chaquopy) reads the
- *      colours and runs the scan / the move tracking,
+ *      colours and runs the scan / the move tracking;
  *   4. the result goes to the tutor page(s) through LocalServer.
  *
  * The glasses' camera is wide-angle (2048x1512): shrunk whole to 640 wide, a
@@ -67,9 +73,20 @@ class TutorEngine(
     private val main = Handler(Looper.getMainLooper())
     private val thread = HandlerThread("Tutor").also { it.start() }
     private val work = Handler(thread.looper)
-    private val bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
+    /** A frame's window and where it was cut from (two of them: one being filled while one is worked on). */
+    private class Buffer {
+        val bitmap: Bitmap = Bitmap.createBitmap(WIDTH, HEIGHT, Bitmap.Config.ARGB_8888)
+        val argb = IntArray(WIDTH * HEIGHT)
+        var started = 0L
+        var x = HOME_X
+        var y = HOME_Y
+        var zoom = 2
+    }
+    private val buffers = arrayOf(Buffer(), Buffer())
+    private val bufferLock = Any()
+    private var pending: Buffer? = null      // cut, waiting for the tutor's thread
+    private var working: Buffer? = null      // being worked on
     private val bytes = ByteArray(WIDTH * HEIGHT * 4)
-    private val argb = IntArray(WIDTH * HEIGHT)
     private val columns = IntArray(WIDTH)
     private var yPlane = ByteArray(0)
     private var uPlane = ByteArray(0)
@@ -82,10 +99,13 @@ class TutorEngine(
         set(value) { field = value.coerceIn(1, 3) }
     private var windowX = HOME_X
     private var windowY = HOME_Y
-    private var sentX = windowX
-    private var sentY = windowY
-    private var sentZoom = 2
     private var lastFound = 0L
+
+    /** While the cube is followed, the model runs on every this-many-th frame (files/finder.txt "every=1" to always). */
+    private var modelEvery = 3
+    private var sinceModel = 0
+    private var followOk = true
+    private var lastWindow = Triple(-1f, -1f, -1)   // where the last frame was cut from
 
     private var finder: CubeFinder? = null
     private var session: PyObject? = null
@@ -97,6 +117,7 @@ class TutorEngine(
     // What is reported on the phone's status line.
     private var frames = 0
     private var foundFrames = 0
+    private var modelFrames = 0
     private var copyMs = 0L
     private var findMs = 0L
     private var pythonMs = 0L
@@ -111,6 +132,8 @@ class TutorEngine(
                 if (!Python.isStarted()) Python.start(AndroidPlatform(context.applicationContext))
                 session = Python.getInstance().getModule("vision.phone").callAttr("PhoneSession")
                 finder = CubeFinder(context)
+                modelEvery = CubeFinder.tuning(context)["every"]?.toIntOrNull()?.coerceIn(1, 6) ?: 3
+                Log.i(TAG, "model ${finder!!.modelName}, every $modelEvery frames while following")
                 since = System.currentTimeMillis()
                 next()
             } catch (e: Throwable) {
@@ -132,48 +155,64 @@ class TutorEngine(
         }
     }
 
-    @Volatile private var wantPicture = false
-
-    /** Ready for the next picture: [offer] fills it in from the decoder. */
+    /** Ready for the next picture: [offer] fills a free buffer from the decoder. */
     private fun next() {
         if (!running) return
-        wantPicture = true
+        work.removeCallbacks(noPicture)
         work.postDelayed(noPicture, 1500)
     }
 
-    private val noPicture = Runnable { if (wantPicture) server.feeding = false }
+    private val noPicture = Runnable { server.feeding = false }
 
     /**
-     * A decoded camera picture (full size, YUV), from the decoder's thread. Taken only when the
-     * tutor is ready for one (the others are skipped, so it never falls behind); the window is cut
-     * out right here, and the rest runs on the tutor's thread. The picture comes straight from the
-     * decoder, not from a view on the screen: XREAL's own app covers this app's screen while the
-     * glasses are in use, and a covered view stops updating.
+     * A decoded camera picture (full size, YUV), from the decoder's thread. Cut into a free buffer if
+     * there is one and none is already waiting (otherwise skipped, so it never falls behind): with two
+     * buffers the next picture is cut while the tutor's thread works on the last. The picture comes
+     * straight from the decoder, not from a view on the screen: XREAL's own app covers this app's
+     * screen while the glasses are in use, and a covered view stops updating.
      */
     fun offer(image: Image) {
-        if (!running || !wantPicture) return
-        wantPicture = false
+        if (!running) return
+        val buffer = synchronized(bufferLock) {
+            if (pending != null) return
+            buffers.firstOrNull { it !== working } ?: return
+        }
+        buffer.started = System.nanoTime()
+        cutWindow(image, buffer)
+        synchronized(bufferLock) { pending = buffer }
+        work.post { take() }
+    }
+
+    private fun take() {
+        val buffer = synchronized(bufferLock) {
+            val b = pending ?: return
+            pending = null
+            working = b
+            b
+        }
         work.removeCallbacks(noPicture)
-        val started = System.nanoTime()
-        cutWindow(image)
-        work.post { process(started) }
+        try {
+            process(buffer)
+        } finally {
+            synchronized(bufferLock) { working = null }
+        }
     }
 
     /**
-     * Cuts the window out of the decoder's full-size picture into [bitmap] (640x472), converting
+     * Cuts the window out of the decoder's full-size picture into the buffer (640x472), converting
      * from the decoder's YUV (BT.601, full range: what the glasses' camera sends) to RGB.
      */
-    private fun cutWindow(image: Image) {
+    private fun cutWindow(image: Image, buffer: Buffer) {
         val z = zoom
-        sentZoom = z
         val iw = image.width
         val ih = image.height
         val w = iw / z
         val h = ih / z
         val x = (windowX * iw - w / 2f).toInt().coerceIn(0, iw - w)   // keep the window inside the picture
         val y = (windowY * ih - h / 2f).toInt().coerceIn(0, ih - h)
-        sentX = (x + w / 2f) / iw
-        sentY = (y + h / 2f) / ih
+        buffer.zoom = z
+        buffer.x = (x + w / 2f) / iw
+        buffer.y = (y + h / 2f) / ih
         val planes = image.planes
         yPlane = copy(planes[0].buffer, yPlane)
         uPlane = copy(planes[1].buffer, uPlane)
@@ -183,6 +222,7 @@ class TutorEngine(
         val uvRow = planes[1].rowStride
         val uvStep = planes[1].pixelStride
         for (ox in 0 until WIDTH) columns[ox] = x + ox * w / WIDTH
+        val argb = buffer.argb
         var i = 0
         for (oy in 0 until HEIGHT) {
             val sy = y + oy * h / HEIGHT
@@ -200,7 +240,7 @@ class TutorEngine(
                 argb[i++] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
             }
         }
-        bitmap.setPixels(argb, 0, WIDTH, 0, 0, WIDTH, HEIGHT)
+        buffer.bitmap.setPixels(argb, 0, WIDTH, 0, 0, WIDTH, HEIGHT)
     }
 
     private fun copy(buffer: java.nio.ByteBuffer, into: ByteArray): ByteArray {
@@ -210,15 +250,32 @@ class TutorEngine(
         return out
     }
 
-    private fun process(started: Long) {
+    private fun process(buffer: Buffer) {
         if (!running) return
+        val bitmap = buffer.bitmap
         try {
             val copied = System.nanoTime()
-            val found = finder!!.find(bitmap)
+            val f = finder!!
+            // Following the cube: the model only every modelEvery-th frame; the corners are followed in between
+            // (not across a move of the window: the whole picture shifts then).
+            val window = Triple(buffer.x, buffer.y, buffer.zoom)
+            val followThis = f.following && followOk && sinceModel < modelEvery - 1 && window == lastWindow
+            lastWindow = window
+            val found = if (followThis) null else f.find(bitmap)
+            if (followThis) sinceModel++ else { sinceModel = 0; modelFrames++ }
             val looked = System.nanoTime()
             bitmap.copyPixelsToBuffer(ByteBuffer.wrap(bytes))
             val reply = synchronized(pythonLock) {
-                session!!.callAttr("frame", bytes, WIDTH, HEIGHT, found?.points, found?.confidence ?: 0f).toString()
+                session!!.callAttr("frame", bytes, WIDTH, HEIGHT, found?.points, found?.confidence ?: 0f, null, followThis).toString()
+            }
+            var seen = found
+            if (followThis) {
+                val followed = followedCorners(reply)
+                followOk = followed != null
+                f.followTo(followed)                 // the next close look goes where the cube is now
+                seen = followed?.let { CubeFinder.Found(it, 1f) }
+            } else {
+                followOk = true
             }
             val done = System.nanoTime()
             server.feeding = true
@@ -228,24 +285,24 @@ class TutorEngine(
                 bitmap.compress(Bitmap.CompressFormat.JPEG, QUALITY, out)
                 server.picture(out.toByteArray())
             }
-            follow(found)
+            follow(seen, buffer)
             if (System.currentTimeMillis() - lastSaved > 3000) {   // the latest picture, for checking (adb: run-as ... cat files/last.jpg)
                 lastSaved = System.currentTimeMillis()
                 java.io.File(context.filesDir, "last.jpg").outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 80, it) }
             }
             frames++
-            if (found != null) foundFrames++
-            copyMs += (copied - started) / 1_000_000
+            if (seen != null) foundFrames++
+            copyMs += (copied - buffer.started) / 1_000_000
             findMs += (looked - copied) / 1_000_000
             pythonMs += (done - looked) / 1_000_000
             val now = System.currentTimeMillis()
             if (now - since >= 2000) {
-                val status = "%.0f frames/s · cube in %d of %d · copy %d, find %d, tutor %d ms".format(
-                    frames * 1000.0 / (now - since), foundFrames, frames, copyMs / frames, findMs / frames, pythonMs / frames)
+                val status = "%.0f frames/s · cube in %d of %d · model in %d · copy %d, find %d, tutor %d ms".format(
+                    frames * 1000.0 / (now - since), foundFrames, frames, modelFrames, copyMs / frames, findMs / frames, pythonMs / frames)
                 val group = try { java.io.File("/proc/self/cpuset").readText().trim() } catch (_: Exception) { "?" }
                 Log.i(TAG, "$status · $group")
                 onStatus(status)
-                since = now; frames = 0; foundFrames = 0; copyMs = 0; findMs = 0; pythonMs = 0
+                since = now; frames = 0; foundFrames = 0; modelFrames = 0; copyMs = 0; findMs = 0; pythonMs = 0
             }
         } catch (e: Throwable) {
             Log.e(TAG, "frame failed", e)
@@ -256,8 +313,15 @@ class TutorEngine(
         next()
     }
 
+    /** The corners the Python code followed the cube to (its reply's keypoints, when 'followed'), or null. */
+    private fun followedCorners(reply: String): FloatArray? = try {
+        val o = org.json.JSONObject(reply)
+        val k = if (o.optBoolean("followed")) o.optJSONArray("keypoints") else null
+        k?.let { FloatArray(14) { i -> it.getJSONArray(i / 2).getDouble(i % 2).toFloat() } }
+    } catch (_: Exception) { null }
+
     /** Keeps the window on the cube. */
-    private fun follow(found: CubeFinder.Found?) {
+    private fun follow(found: CubeFinder.Found?, buffer: Buffer) {
         val now = System.currentTimeMillis()
         if (found != null && found.confidence >= 0.5f) {
             lastFound = now
@@ -266,10 +330,10 @@ class TutorEngine(
                 x0 = minOf(x0, found.points[2 * i]); x1 = maxOf(x1, found.points[2 * i])
                 y0 = minOf(y0, found.points[2 * i + 1]); y1 = maxOf(y1, found.points[2 * i + 1])
             }
-            val z = sentZoom.toFloat()
+            val z = buffer.zoom.toFloat()
             // The cube's place in the whole view: the window's middle plus its place inside the window.
-            val cubeX = sentX + ((x0 + x1) / 2 / WIDTH - 0.5f) / z
-            val cubeY = sentY + ((y0 + y1) / 2 / HEIGHT - 0.5f) / z
+            val cubeX = buffer.x + ((x0 + x1) / 2 / WIDTH - 0.5f) / z
+            val cubeY = buffer.y + ((y0 + y1) / 2 / HEIGHT - 0.5f) / z
             // Only move when the cube nears the edge: a window that moved every frame would make a
             // cube held still look as if it were moving.
             if (kotlin.math.abs((cubeX - windowX) * z) > EDGE || kotlin.math.abs((cubeY - windowY) * z) > EDGE) {

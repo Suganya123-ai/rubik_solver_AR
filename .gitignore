@@ -55,3 +55,6 @@ data/scans/
 
 # Self-signed certificate for serving the glasses app over https (made by run_glasses.sh)
 .certs/
+
+# a link to the background photos (not in git)
+bench/data
