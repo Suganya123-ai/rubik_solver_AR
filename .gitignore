@@ -58,3 +58,11 @@ pyra/table.npz
 
 # Pyraminx demo frames saved for training (pyra/record.py)
 data/pyra_sessions/
+
+# shared with the pyraminx folder (a link, not a folder)
+web/node_modules
+
+# the self-improving loop: its work files, and the models it promotes (local to this laptop)
+data/autolearn/
+models/current.json
+models/*_auto_*.pt

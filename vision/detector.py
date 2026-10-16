@@ -13,7 +13,11 @@ _MODELS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 # Newest model first: v3 adds steep angles, small/far cubes, fingers on the stickers, heavy blur,
 # dark light and real camera frames; v2 adds stickerless cubes, real backgrounds with people,
 # hands and close-ups; the first model only saw stickered cubes on plain clutter.
-MODEL_PATH = os.environ.get('RUBIK_MODEL') or next((os.path.join(_MODELS, m) for m in ('cube_pose_real.pt', 'cube_pose_v3.pt', 'cube_pose_v2.pt', 'cube_pose_synthetic.pt')
+from .current_model import current_model  # noqa: E402
+
+# The self-improving loop's promoted model (models/current.json) comes first, then the newest built-in.
+MODEL_PATH = os.environ.get('RUBIK_MODEL') or (current_model('cube', 'cube_pose_v3.pt')
+                                               if os.path.exists(os.path.join(_MODELS, 'current.json')) else None) or next((os.path.join(_MODELS, m) for m in ('cube_pose_real.pt', 'cube_pose_v3.pt', 'cube_pose_v2.pt', 'cube_pose_synthetic.pt')
                    if os.path.exists(os.path.join(_MODELS, m))), os.path.join(_MODELS, 'cube_pose_synthetic.pt'))
 
 
