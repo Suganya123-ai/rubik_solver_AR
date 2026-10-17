@@ -6,6 +6,13 @@ import type { AppState } from '../appState';
 import type { Effects } from '../overlay/effects';
 import type { Message, ServerLink } from '../serverLink';
 import { type Geo, SWATCH, geometry } from './geometry';
+import { type Command, Voice } from '../voice';
+
+/** What the voice says for a card (as the cube tutor's): news labels, then the title and text. */
+function spoken(label: string, title: string, text: string): string {
+  const news = /^(MOVE|✓|UNDO|WRONG|SOLVED|READY|Scan)/i.test(label) ? `${label.charAt(0)}${label.slice(1).toLowerCase()}. ` : '';
+  return `${news}${title}. ${text.replace(/\s*Follow the arrow \(x1\), then hold the pyramid still\.?/g, ' Then hold it still.')}`;
+}
 
 type Scan = { phase: string; steady: number; needed: number; message: string | null; faces_done: number;
   instruction: string | null; event: string | null; refused?: string };
@@ -31,6 +38,8 @@ export class PyraFlow {
   private stats = { start: 0, mistakes: 0, moves: 0 };
   private audio: AudioContext | null = null;
   private el: Record<string, HTMLElement> = {};
+  /** Says each instruction as it changes; listens for "next", "repeat", "solve"... (../voice.ts). */
+  readonly voice = new Voice((cmd) => this.command(cmd));
 
   constructor(private link: ServerLink, private state: AppState, private effects: Effects, root: HTMLElement) {
     root.innerHTML = `
@@ -63,6 +72,7 @@ export class PyraFlow {
     }
     this.el['popup-close'].onclick = () => (this.el.popup.hidden = true);
     addEventListener('keydown', (e) => this.key(e));
+    addEventListener('pointerdown', () => this.voice.listen(), { once: true });   // a microphone needs a click first
     this.idle();
   }
 
@@ -95,7 +105,19 @@ export class PyraFlow {
     this.steady(0);
   }
 
+  /** A spoken command: the same as the button or key for it, where that applies now. */
+  private command(cmd: Command): void {
+    const p = this.state.phase;
+    if (cmd === 'scan' && (p === 'camera' || p === 'solved' || p === 'review')) this.startScan();
+    else if (cmd === 'solve' && p === 'review' && this.review?.valid) this.solve();
+    else if (cmd === 'next' && (p === 'guided' || p === 'undo')) this.link.send({ type: 'track_skip' });
+    else if (cmd === 'plan' && p === 'undo') this.link.send({ type: 'track_replan' });
+    else if (cmd === 'stop' && (p === 'scan' || p === 'guided' || p === 'undo')) this.cancel();
+    else this.voice.say(this.voice.last || 'Say help to hear what you can say.', true);
+  }
+
   private startScan(): void {
+    this.voice.listen();
     this.ensureAudio();
     this.link.send({ type: 'scan_start' });
     this.review = null; this.locked = {};
@@ -103,6 +125,7 @@ export class PyraFlow {
     this.guide = null; this.track = null;
     this.state.set('scan');
     this.card('Scan · 0 of 4 faces', 'Hold still', '', [['Cancel  (Esc)', () => this.cancel(), '']]);
+    this.voice.say('Scan started. Hold the pyramid tip up, with an edge pointing at the camera, so two faces show. Then hold it still.', false, true);
   }
 
   private cancel(): void {
@@ -145,6 +168,9 @@ export class PyraFlow {
     this.el['review-title'].textContent = !r.valid ? 'Those colours are not a possible Pyraminx: tap the highlighted stickers to fix them.'
       : doubtful.length ? `Check the ${doubtful.length} highlighted stickers: tap one to change its colour, or confirm they look right.`
         : 'Every sticker read clearly. Ready to solve.';
+    this.voice.say(!r.valid ? "All four faces scanned, but the colours don't make a real Pyraminx. Fix the highlighted stickers, or say scan."
+      : doubtful.length ? `All four faces scanned. Check the ${doubtful.length} highlighted stickers on screen. If they look right, say solve.`
+        : 'All four faces scanned, every sticker read clearly. Say solve when you are ready.');
     this.drawNet(r, new Set(doubtful));
     const buttons: [string, () => void, string][] = [];
     if (r.valid) buttons.push([doubtful.length ? 'They look right  (Enter)' : 'Solve  (Enter)', () => this.solve(), 'primary']);
@@ -274,6 +300,8 @@ export class PyraFlow {
 
   // ---------- UI helpers (as in the cube app) ----------
   private card(label: string, title: string, text: string, buttons: [string, () => void, string][], tone = ''): void {
+    // "Hold still…" comes and goes as the pyramid moves: not said. News cuts in.
+    if (!/^Hold still/.test(title)) this.voice.say(spoken(label, title, text), false, /^(✓|UNDO|WRONG|SOLVED)/.test(label));
     this.el.card.hidden = false;
     this.el.card.className = 'card ' + tone;
     this.el['card-label'].textContent = label;

@@ -10,6 +10,7 @@
 import type { AppState } from './appState';
 import type { Effects } from './overlay/effects';
 import { describe, holdHint } from './moveText';
+import { type Command, Voice } from './voice';
 import type { FrameReply, Message, ServerLink } from './serverLink';
 
 type ScanStatus = { phase: string; instruction: string | null; steady: number; needed: number;
@@ -25,6 +26,14 @@ const NET: Record<string, [number, number]> = { U: [1, 0], L: [0, 1], F: [1, 1],
 const PALETTE = ['white', 'yellow', 'red', 'orange', 'green', 'blue'];
 const SWATCH: Record<string, string> = { white: '#f4f4f0', yellow: '#ffd43b', red: '#e03131', orange: '#ff8a1f',
   green: '#2fb35a', blue: '#2a6fdb' };
+
+/** What the voice says for a card: its label when it is news ("Move 3 of 18", "Correct"), the
+ *  title and the text, without what only makes sense on screen. */
+function spoken(label: string, title: string, text: string): string {
+  const news = /^(Move|✓|Not that|Undo|Lost|Solved|Get ready|Got it|New plan|Scan|Ready)/.test(label) ? `${label}. ` : '';
+  const body = text.replace(/\s*Then hold the cube still\.?/g, '').replace(/\(move (\d+) of (\d+)\)/, 'Next is move $1 of $2.');
+  return `${news}${title}. ${body}`;
+}
 
 /** A move from the user's seat: a title ("Turn the green side (facing you)") and how ("its top edge moves to your left"). */
 function moveWords(move: string, colours: Record<string, string>): { colour: string; title: string; how: string } {
@@ -44,6 +53,8 @@ export class Flow {
   private stats = { start: 0, mistakes: 0, moves: 0 };
   private audio: AudioContext | null = null;
   private el: Record<string, HTMLElement> = {};
+  /** Says each instruction as it changes; listens for "next", "repeat", "solve"... (voice.ts). */
+  readonly voice = new Voice((cmd) => this.command(cmd));
 
   constructor(private link: ServerLink, private state: AppState, private effects: Effects, root: HTMLElement) {
     root.innerHTML = `
@@ -77,6 +88,8 @@ export class Flow {
       this.el[id] = root.querySelector('#' + id)!;
     }
     this.el['popup-close'].onclick = () => (this.el.popup.hidden = true);
+    if (window.TutorVoice) this.voice.listen();          // the glasses app: no click needed for the microphone
+    else addEventListener('pointerdown', () => this.voice.listen(), { once: true });
     for (const colour of PALETTE) {
       const b = document.createElement('button');
       b.style.background = SWATCH[colour];
@@ -125,7 +138,20 @@ export class Flow {
       [['Start scan  (S)', () => this.startScan(), 'primary']]);
   }
 
+  /** A spoken command: the same as the button or key for it, where that applies now. */
+  private command(cmd: Command): void {
+    const p = this.state.phase;
+    if (cmd === 'scan' && (p === 'camera' || p === 'solved' || p === 'review')) this.startScan();
+    else if (cmd === 'solve' && p === 'review' && this.review?.valid) {
+      if (this.review.doubtful.length) this.confirmHighlighted(); else this.solve();
+    } else if (cmd === 'next' && (p === 'guided' || p === 'undo')) this.link.send({ type: 'track_skip' });
+    else if (cmd === 'plan' && p === 'undo') this.link.send({ type: 'track_replan' });
+    else if (cmd === 'stop' && (p === 'scan' || p === 'guided' || p === 'undo')) this.cancel();
+    else this.voice.say(this.voice.last || 'Say help to hear what you can say.', true);   // not now: say where we are
+  }
+
   private startScan(): void {
+    this.voice.listen();
     this.ensureAudio();
     this.link.send({ type: 'scan_start' });
     this.enterScan();
@@ -192,6 +218,9 @@ export class Flow {
       ? "This doesn't read as a real cube. Tap any wrong sticker to fix it, or scan again."
       : n ? `Check the ${n} highlighted sticker${n > 1 ? 's' : ''}: tap one to change it, or confirm they look right.`
         : 'Every sticker read clearly. Ready to solve.';
+    this.voice.say(!r.valid ? "All sides scanned, but the colours don't make a real cube. Fix the wrong sticker, or say scan to scan again."
+      : n ? `All six sides scanned. Check the ${n} highlighted sticker${n > 1 ? 's' : ''} on screen. If they look right, say solve.`
+        : 'All six sides scanned, every sticker read clearly. Say solve when you are ready.');
     const buttons: [string, () => void, string][] = [];
     if (r.valid && n) buttons.push(['They look right  (Enter)', () => this.confirmHighlighted(), 'primary']);
     if (r.valid && !n) buttons.push(['Solve  (Enter)', () => this.solve(), 'primary']);
@@ -338,6 +367,8 @@ export class Flow {
   // ---------- UI helpers ----------
   private card(label: string, chip: string, title: string, text: string, buttons: [string, () => void, string][],
                tone = ''): void {
+    // "Hold still…" comes and goes as the cube moves: not said. News (correct, wrong, captured, solved) cuts in.
+    if (!/^Hold still/.test(title)) this.voice.say(spoken(label, title, text), false, /^(✓|Not that|Solved|Lost|New plan)/.test(label));
     this.el.card.hidden = false;
     this.el.card.className = 'card ' + tone;
     this.el['card-label'].textContent = label;
