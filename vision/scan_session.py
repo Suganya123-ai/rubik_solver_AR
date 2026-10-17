@@ -20,7 +20,7 @@ import numpy as np
 
 from cube.color_detect import color_feature
 from cube.cube_state import FACES
-from cube.scan import VIEW_INSTRUCTIONS, _misfit, all_holds, scan_any_hold, scan_result, view_facelets
+from cube.scan import VIEW_INSTRUCTIONS, all_holds, scan_any_hold, scan_result, view_facelets
 
 STEADY_FRAMES = 3      # and STEADY_SECONDS: time decides (at a normal 15 frames/s that's 6+ frames);
                        # a slow link (e.g. a forwarded port, ~4 frames/s) only needs 3
@@ -30,8 +30,12 @@ FRAME_GAP = 1 / 15          # fraction of the cube's size
 FLIP_GRACE_S = 3.0        # after view 1 is captured, give the user this long to flip before warning
 MATCH_MAX = 32            # stickers of an already-scanned side must be this close (mean) to count as that side
 MATCH_MARGIN = 0.75       # ...and clearly closer than the next-best way of turning the cube
-OPPOSITE_FIT_MAX = 16     # a view with no scanned side in it: accept as the opposite corner if the cube fits this well
+MIN_SIDE_SHARE = 0.15     # only capture when the smallest of the three sides shows at least this share of the
+                          # largest (held nearly face-on, a side is a sliver and its colours can't be read; real
+                          # captures on 15 Oct 2026: 84 views, smallest share 0.18)
 SAME_SIDE_DISTANCE = 27   # mean colour-feature distance below which two sides are the same side (renders: same <= 25, different >= 29)
+SAME_CENTRE_DISTANCE = 20 # a way of turning the cube that puts a centre on a scanned centre must match it this well
+                          # (red and orange centres read ~30 apart; the same centre twice reads much closer)
 
 
 _HOLDS = [(m, view_facelets(2, m)) for m in all_holds()]   # each way of holding: which sticker is where in the picture
@@ -86,6 +90,9 @@ class ScanSession:
             self._reset_steady()
             return {**self.status(), 'event': None}
         k = np.asarray(kpts, float)
+        if _side_share(k) < MIN_SIDE_SHARE:
+            self._reset_steady()
+            return {**self.status(), 'event': None}
         size = np.mean(np.linalg.norm(k[1:] - k[0], axis=1))
         gap = min(3.0, max(1.0, (now - self._last_time) / FRAME_GAP)) if self._last_time is not None else 1.0
         self._last_time = now
@@ -156,9 +163,14 @@ class ScanSession:
         fits = []
         for _, facelets in _HOLDS:
             # Stickers of this view that would land on already-scanned ones (centres left
-            # out: a logo or a glossy cap makes two different centres look alike).
+            # out of the score: a logo or a glossy cap makes two different centres look alike).
             shared = [k for k in range(27) if facelets[k] in known and k % 9 != 4]
             if len(shared) < 8:
+                continue
+            # ...but a centre landing on a scanned centre of another colour rules this way out:
+            # some scrambles leave two sides with the same outer stickers, only the centres differ.
+            if any(facelets[k] in known and np.linalg.norm(seen[k] - known[facelets[k]]) >= SAME_CENTRE_DISTANCE
+                   for k in (4, 13, 22)):
                 continue
             cost = float(np.mean([np.linalg.norm(seen[k] - known[facelets[k]]) for k in shared]))
             fits.append((cost, facelets))
@@ -166,9 +178,10 @@ class ScanSession:
         if fits and fits[0][0] < MATCH_MAX and (len(fits) == 1 or fits[0][0] < MATCH_MARGIN * fits[1][0]):
             facelets = fits[0][1]
             return ('add', facelets) if any(i not in self.known for i in facelets) else ('nothing new', None)
-        if self.views == 1:  # no scanned side recognised: it may be the opposite corner (three new sides)
+        if self.views == 1 and self._side_seen_before(reading) is None:
+            # No scanned side in it (outer stickers and centre): the opposite corner, three new sides.
             rgbs, result = scan_any_hold({1: self.readings[1], 2: reading})
-            if result['valid'] and _misfit(rgbs, result['colors']) < OPPOSITE_FIT_MAX:
+            if result['valid']:
                 return 'opposite', (rgbs, result)
         return 'unclear', None
 
@@ -182,10 +195,13 @@ class ScanSession:
         ('U' top, 'F' left, 'R' right) of a view-2 side whose 8 outer stickers
         match a view-1 side (turned any way), else None. Centres are left
         out: a logo or glossy centre cap can make two different centres look alike."""
-        first = [_outer_ring(self.readings[1][f]) for f in 'UFR']
+        first = [(_outer_ring(self.readings[1][g]), np.array(color_feature(self.readings[1][g][4]))) for g in 'UFR']
         for f in 'UFR':
             ring = _outer_ring(reading[f])
-            for old in first:
+            centre = np.array(color_feature(reading[f][4]))
+            for old, old_centre in first:
+                if np.linalg.norm(centre - old_centre) >= SAME_CENTRE_DISTANCE:
+                    continue  # a different centre: a different side, however alike the rest looks
                 for turn in range(4):  # a quarter turn of a side moves its ring by 2
                     if np.mean(np.linalg.norm(ring - np.roll(old, 2 * turn, axis=0), axis=1)) < SAME_SIDE_DISTANCE:
                         return f
@@ -193,6 +209,18 @@ class ScanSession:
 
     def _shares_a_side_with_view1(self, reading):
         return self._side_seen_before(reading) is not None
+
+
+_FACE_CORNERS = ((2, 3, 0, 1), (1, 0, 5, 6), (0, 3, 4, 5))   # top, left, right sides as corner points
+
+
+def _side_share(k):
+    """Smallest side's area over the largest's, from the 7 corner points (1 = all three equal)."""
+    def area(idx):
+        q = k[list(idx)]
+        return abs(np.dot(q[:, 0], np.roll(q[:, 1], -1)) - np.dot(q[:, 1], np.roll(q[:, 0], -1))) / 2
+    areas = [area(idx) for idx in _FACE_CORNERS]
+    return min(areas) / max(max(areas), 1e-9)
 
 
 def _uncovered_median(buffer, face, i):

@@ -106,6 +106,8 @@ class TutorEngine(
     private var sinceModel = 0
     private var followOk = true
     private var lastWindow = Triple(-1f, -1f, -1)   // where the last frame was cut from
+    private var tuningStamp = 0L                     // files/finder.txt's time when last read
+    private var tuningChecked = 0L
 
     private var finder: CubeFinder? = null
     private var session: PyObject? = null
@@ -133,6 +135,7 @@ class TutorEngine(
                 session = Python.getInstance().getModule("vision.phone").callAttr("PhoneSession")
                 finder = CubeFinder(context)
                 modelEvery = CubeFinder.tuning(context)["every"]?.toIntOrNull()?.coerceIn(1, 6) ?: 3
+                tuningStamp = java.io.File(context.filesDir, "finder.txt").lastModified()
                 Log.i(TAG, "model ${finder!!.modelName}, every $modelEvery frames while following")
                 since = System.currentTimeMillis()
                 next()
@@ -213,25 +216,39 @@ class TutorEngine(
         buffer.zoom = z
         buffer.x = (x + w / 2f) / iw
         buffer.y = (y + h / 2f) / ih
+        // Only the rows the window needs are read from the decoder's picture (2048x1512: copying it whole
+        // was ~4.6 MB a frame on a phone whose processor is shared with the glasses' own software).
         val planes = image.planes
-        yPlane = copy(planes[0].buffer, yPlane)
-        uPlane = copy(planes[1].buffer, uPlane)
-        vPlane = copy(planes[2].buffer, vPlane)
+        val yBuf = planes[0].buffer.duplicate()
+        val uBuf = planes[1].buffer.duplicate()
+        val vBuf = planes[2].buffer.duplicate()
         val yRow = planes[0].rowStride
         val yStep = planes[0].pixelStride
         val uvRow = planes[1].rowStride
         val uvStep = planes[1].pixelStride
-        for (ox in 0 until WIDTH) columns[ox] = x + ox * w / WIDTH
+        val yLen = w * yStep
+        val uvX = x shr 1
+        val uvLen = ((w + 1) shr 1) * uvStep + uvStep
+        if (yPlane.size < yLen) yPlane = ByteArray(yLen)
+        if (uPlane.size < uvLen) uPlane = ByteArray(uvLen)
+        if (vPlane.size < uvLen) vPlane = ByteArray(uvLen)
+        for (ox in 0 until WIDTH) columns[ox] = ox * w / WIDTH      // relative to the window's left edge
         val argb = buffer.argb
         var i = 0
+        var uvLoaded = -1
         for (oy in 0 until HEIGHT) {
             val sy = y + oy * h / HEIGHT
-            val yLine = sy * yRow
-            val uvLine = (sy shr 1) * uvRow
+            readRow(yBuf, sy * yRow + x * yStep, yPlane, yLen)
+            val uvLine = sy shr 1
+            if (uvLine != uvLoaded) {
+                readRow(uBuf, uvLine * uvRow + uvX * uvStep, uPlane, uvLen)
+                readRow(vBuf, uvLine * uvRow + uvX * uvStep, vPlane, uvLen)
+                uvLoaded = uvLine
+            }
             for (ox in 0 until WIDTH) {
                 val sx = columns[ox]
-                val luma = yPlane[yLine + sx * yStep].toInt() and 0xFF
-                val uv = uvLine + (sx shr 1) * uvStep
+                val luma = yPlane[sx * yStep].toInt() and 0xFF
+                val uv = (((x + sx) shr 1) - uvX) * uvStep
                 val u = (uPlane[uv].toInt() and 0xFF) - 128
                 val v = (vPlane[uv].toInt() and 0xFF) - 128
                 val r = (luma + ((359 * v) shr 8)).coerceIn(0, 255)
@@ -243,6 +260,13 @@ class TutorEngine(
         buffer.bitmap.setPixels(argb, 0, WIDTH, 0, 0, WIDTH, HEIGHT)
     }
 
+    /** Reads len bytes of a decoder plane from `start` (fewer at the plane's end). */
+    private fun readRow(buf: java.nio.ByteBuffer, start: Int, into: ByteArray, len: Int) {
+        if (start >= buf.limit()) return
+        buf.position(start)
+        buf.get(into, 0, minOf(len, buf.limit() - start))
+    }
+
     private fun copy(buffer: java.nio.ByteBuffer, into: ByteArray): ByteArray {
         buffer.rewind()
         val out = if (into.size >= buffer.remaining()) into else ByteArray(buffer.remaining())
@@ -250,8 +274,23 @@ class TutorEngine(
         return out
     }
 
+    /** files/finder.txt changed (adb): a new cube finder with the new settings, without restarting the camera. */
+    private fun retune() {
+        val now = System.currentTimeMillis()
+        if (now - tuningChecked < 3000) return
+        tuningChecked = now
+        val stamp = java.io.File(context.filesDir, "finder.txt").lastModified()
+        if (stamp == tuningStamp) return
+        tuningStamp = stamp
+        finder?.close()
+        finder = CubeFinder(context)
+        modelEvery = CubeFinder.tuning(context)["every"]?.toIntOrNull()?.coerceIn(1, 6) ?: 3
+        Log.i(TAG, "new settings: model ${finder!!.modelName}, every $modelEvery")
+    }
+
     private fun process(buffer: Buffer) {
         if (!running) return
+        retune()
         val bitmap = buffer.bitmap
         try {
             val copied = System.nanoTime()

@@ -49,45 +49,59 @@ def use_java_solver(search_class=None):
 
 class CornerFollower:
     """Moves the cube's 7 corners from the last frame the model looked at to this one, for the frames the
-    model skips (the app runs it every other frame while the cube is followed: it is the slow part).
+    model skips (the app runs it every few frames while the cube is followed: it is the slow part).
 
     Points that are easy to follow (corners of stickers) are picked inside the cube where the model last
     saw it, followed into each new frame (optical flow, checked by following them back), and the motion
     that fits most of them (move, turn, size) is applied to the 7 corners. Too few points agreeing (a hand
     across the cube, a fast move, a layer turning): no corners, and the app runs the model on the next
-    frame."""
+    frame. Only a square around the cube is worked on (the phone's processor is shared with the glasses'
+    own software: the whole picture took ~40 ms a frame there, this a few)."""
     MIN_POINTS = 8
     MAX_BACK = 1.0     # pixels: a point followed forward and back must land this close to where it started
+    MARGIN = 0.4       # the square worked on: the cube's size plus this much of it on each side
 
     def __init__(self):
         import cv2
         self.cv2 = cv2
-        self.gray = None
-        self.points = None
+        self.crop = None      # the last frame's square around the cube (gray)
+        self.box = None       # where that square is in the frame: x0, y0, x1, y1
+        self.points = None    # points to follow, in the square's pixels
         self.kpts = None
         self.confidence = 0.0
 
     def reset(self):
-        self.gray = self.points = self.kpts = None
+        self.crop = self.box = self.points = self.kpts = None
+
+    def _box(self, kpts, shape):
+        (x0, y0), (x1, y1) = kpts.min(0), kpts.max(0)
+        m = max(x1 - x0, y1 - y0) * self.MARGIN + 8
+        h, w = shape
+        return (int(max(0, x0 - m)), int(max(0, y0 - m)), int(min(w, x1 + m)), int(min(h, y1 + m)))
 
     def seen(self, gray, kpts, confidence):
         """The model found the cube here: start following from this frame."""
         cv2 = self.cv2
-        mask = np.zeros(gray.shape, np.uint8)
-        centre = kpts.mean(0)
-        hull = cv2.convexHull(kpts.astype(np.float32))[:, 0]
+        self.box = x0, y0, x1, y1 = self._box(kpts, gray.shape)
+        self.crop = gray[y0:y1, x0:x1].copy()
+        mask = np.zeros(self.crop.shape, np.uint8)
+        local = kpts - [x0, y0]
+        centre = local.mean(0)
+        hull = cv2.convexHull(local.astype(np.float32))[:, 0]
         cv2.fillConvexPoly(mask, np.round(centre + (hull - centre) * 0.85).astype(np.int32), 255)
-        self.points = cv2.goodFeaturesToTrack(gray, maxCorners=40, qualityLevel=0.01, minDistance=6, mask=mask)
-        self.gray, self.kpts, self.confidence = gray, kpts.astype(np.float32), confidence
+        self.points = cv2.goodFeaturesToTrack(self.crop, maxCorners=30, qualityLevel=0.01, minDistance=6, mask=mask)
+        self.kpts, self.confidence = kpts.astype(np.float32), confidence
 
     def follow(self, gray):
         """The corners in this frame, or None."""
         cv2 = self.cv2
-        if self.gray is None or self.points is None or len(self.points) < self.MIN_POINTS:
+        if self.crop is None or self.points is None or len(self.points) < self.MIN_POINTS:
             return None
-        lk = dict(winSize=(21, 21), maxLevel=3, criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 20, 0.03))
-        fwd, ok1, _ = cv2.calcOpticalFlowPyrLK(self.gray, gray, self.points, None, **lk)
-        back, ok2, _ = cv2.calcOpticalFlowPyrLK(gray, self.gray, fwd, None, **lk)
+        x0, y0, x1, y1 = self.box
+        now = gray[y0:y1, x0:x1]                      # the same square in this frame
+        lk = dict(winSize=(15, 15), maxLevel=2, criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 15, 0.05))
+        fwd, ok1, _ = cv2.calcOpticalFlowPyrLK(self.crop, now, self.points, None, **lk)
+        back, ok2, _ = cv2.calcOpticalFlowPyrLK(now, self.crop, fwd, None, **lk)
         good = (ok1[:, 0] == 1) & (ok2[:, 0] == 1) & (np.linalg.norm(back - self.points, axis=2)[:, 0] < self.MAX_BACK)
         if good.sum() < self.MIN_POINTS:
             self.reset()
@@ -96,10 +110,15 @@ class CornerFollower:
         if m is None or inliers.sum() < self.MIN_POINTS:
             self.reset()
             return None
-        self.kpts = (self.kpts @ m[:, :2].T + m[:, 2]).astype(np.float32)
-        self.points = fwd[good][inliers[:, 0] == 1].reshape(-1, 1, 2)
-        self.gray = gray
-        return self.kpts
+        kpts = ((self.kpts - [x0, y0]) @ m[:, :2].T + m[:, 2] + [x0, y0]).astype(np.float32)
+        # carry on from this frame: the square moves with the cube, the points that agreed come along
+        pts = fwd[good][inliers[:, 0] == 1].reshape(-1, 2) + [x0, y0]
+        self.box = nx0, ny0, nx1, ny1 = self._box(kpts, gray.shape)
+        self.crop = gray[ny0:ny1, nx0:nx1].copy()
+        inside = (pts[:, 0] >= nx0) & (pts[:, 0] < nx1) & (pts[:, 1] >= ny0) & (pts[:, 1] < ny1)
+        self.points = (pts[inside] - [nx0, ny0]).astype(np.float32).reshape(-1, 1, 2)
+        self.kpts = kpts
+        return kpts
 
 
 class PhoneSession:
@@ -109,6 +128,9 @@ class PhoneSession:
         self.client = LiveClient(name='phone')
         self.frames = 0
         self.follower = CornerFollower()
+        import cv2
+        cv2.setNumThreads(1)
+        self._times = {}      # where the time goes, averaged and printed every 60 frames (logcat: python.stdout)   # the phone's cores are shared with the glasses' software: OpenCV's own threads only add waiting
 
     def frame(self, pixels, width, height, keypoints, confidence, hands_json=None, follow=False):
         """One camera frame.
@@ -122,6 +144,7 @@ class PhoneSession:
         t0 = time.perf_counter()
         rgba = np.frombuffer(_as_bytes(pixels), np.uint8).reshape(height, width, 4)
         frame = np.ascontiguousarray(rgba[:, :, 2::-1])  # BGR, as the rest of the code expects
+        t1 = time.perf_counter()
         found, followed = None, False
         import cv2
         gray = cv2.cvtColor(rgba, cv2.COLOR_RGBA2GRAY)
@@ -139,10 +162,24 @@ class PhoneSession:
             self.follower.reset()
         hands = json.loads(hands_json) if hands_json else []
         self.frames += 1
-        reply = self.client.handle_result(self.frames, build_result(frame, found, hands, t0))
-        reply['ms'] = round((time.perf_counter() - t0) * 1000, 1)
+        t2 = time.perf_counter()
+        result = build_result(frame, found, hands, t0)
+        t3 = time.perf_counter()
+        reply = self.client.handle_result(self.frames, result)
+        t4 = time.perf_counter()
+        reply['ms'] = round((t4 - t0) * 1000, 1)
         reply['followed'] = followed
-        return json.dumps(reply, default=float)
+        out = json.dumps(reply, default=float)
+        t5 = time.perf_counter()
+        if found is not None:
+            for name, dt in (('picture', t1 - t0), ('follow', t2 - t1), ('read', t3 - t2), ('scan/track', t4 - t3), ('json', t5 - t4)):
+                self._times[name] = self._times.get(name, 0.0) + dt
+            self._times['n'] = self._times.get('n', 0) + 1
+            if self._times['n'] >= 60:
+                n = self._times.pop('n')
+                print('tutor time a frame (cube in view): ' + ', '.join(f'{k} {v / n * 1000:.1f} ms' for k, v in self._times.items()))
+                self._times = {}
+        return out
 
     def command(self, text):
         """A command from the page (scan_start, scan_accept, track_skip...), as JSON text."""

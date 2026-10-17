@@ -189,8 +189,36 @@ class UvcCameraHelper(private val context: Context) {
         }, "UVC-Stream").also { it.start() }
     }
 
+    /** The camera's picture formats and sizes, from its USB descriptors, for the log (UVC video-streaming
+     *  format and frame descriptors: class-specific interface descriptors, type 0x24). */
+    private fun logFrameSizes(conn: UsbDeviceConnection) {
+        val raw = conn.rawDescriptors ?: return
+        var i = 0
+        var format = 0
+        while (i + 2 < raw.size) {
+            val len = raw[i].toInt() and 0xFF
+            if (len < 3 || i + len > raw.size) break
+            if ((raw[i + 1].toInt() and 0xFF) == 0x24) {
+                val sub = raw[i + 2].toInt() and 0xFF
+                if (sub in intArrayOf(0x04, 0x06, 0x10, 0x13)) {          // format: uncompressed, MJPEG, frame-based, H.264
+                    format = raw[i + 3].toInt() and 0xFF
+                    Log.i(TAG, "camera format $format (descriptor type 0x%02x)".format(sub))
+                } else if (sub in intArrayOf(0x05, 0x07, 0x11, 0x14) && len >= 9) {   // the frame sizes of that format
+                    val frame = raw[i + 3].toInt() and 0xFF
+                    val w = (raw[i + 5].toInt() and 0xFF) or ((raw[i + 6].toInt() and 0xFF) shl 8)
+                    val h = (raw[i + 7].toInt() and 0xFF) or ((raw[i + 8].toInt() and 0xFF) shl 8)
+                    Log.i(TAG, "camera format $format frame $frame: ${w}x$h")
+                }
+            }
+            i += len
+        }
+    }
+
     private fun negotiateStream(conn: UsbDeviceConnection, vsIface: UsbInterface, endpoint: UsbEndpoint) {
         val ifaceId = vsIface.id
+        try { logFrameSizes(conn) } catch (e: Exception) { Log.w(TAG, "could not read the camera's sizes: ${e.message}") }
+        // Which picture size to ask for (files/finder.txt "camframe=2"; the first by default).
+        val frameIndex = CubeFinder.tuning(context)["camframe"]?.toIntOrNull() ?: 1
 
         // Step 1: Try SET_INTERFACE to alternate setting 1 to start the encoder
         listener?.onLog("SET_INTERFACE alt=1 for IF#$ifaceId...")
@@ -210,13 +238,13 @@ class UvcCameraHelper(private val context: Context) {
         }
 
         var probeSize = 34
-        var probe = buildProbeData(probeSize, formatIndex = 1, frameIndex = 1, fps = 30)
+        var probe = buildProbeData(probeSize, formatIndex = 1, frameIndex = frameIndex, fps = 30)
 
-        listener?.onLog("SET_CUR probe (fmt=1 frm=1 30fps)...")
+        listener?.onLog("SET_CUR probe (fmt=1 frm=$frameIndex 30fps)...")
         var result = uvcSetControl(conn, VS_PROBE_CONTROL, ifaceId, probe)
         if (result < 0) {
             probeSize = 26
-            probe = buildProbeData(probeSize, formatIndex = 1, frameIndex = 1, fps = 30)
+            probe = buildProbeData(probeSize, formatIndex = 1, frameIndex = frameIndex, fps = 30)
             result = uvcSetControl(conn, VS_PROBE_CONTROL, ifaceId, probe)
         }
 
