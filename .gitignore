@@ -58,3 +58,6 @@ data/scans/
 
 # a link to the background photos (not in git)
 bench/data
+
+# shared with the phone folder (a link)
+web/node_modules

@@ -137,8 +137,9 @@ class GlassesScreen(private val context: Context, private val server: String) {
             // Still in the side-by-side 3D mode (twice as wide): one copy of the tutor per eye.
             val wide = display.mode.physicalWidth >= 3 * display.mode.physicalHeight
             val row = android.widget.LinearLayout(context).apply { orientation = android.widget.LinearLayout.HORIZONTAL }
-            repeat(if (wide) 2 else 1) {
+            repeat(if (wide) 2 else 1) { i ->
                 val view = page()
+                if (i == 0) TutorVoice.attach(view, TutorVoice.GLASSES)   // one copy speaks and listens (TutorVoice)
                 row.addView(view, android.widget.LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
                 webs.add(view)
             }

@@ -44,8 +44,11 @@ class MainActivity : AppCompatActivity(), GlassesConnection.Listener {
         binding.logText.movementMethod = ScrollingMovementMethod()
         // Android 14 gives a USB camera (the glasses' camera) only to apps that hold the camera
         // permission; without it the USB prompt is refused straight away ("USB permission denied").
-        if (checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(android.Manifest.permission.CAMERA), 1)
+        // the camera, and the microphone for spoken commands ("next", "repeat": TutorVoice)
+        val missing = arrayOf(android.Manifest.permission.CAMERA, android.Manifest.permission.RECORD_AUDIO)
+            .filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty()) {
+            requestPermissions(missing.toTypedArray(), 1)
         }
         if (intent?.getBooleanExtra("selftest", false) == true) Thread { SelfTest.run(this) }.start()   // see SelfTest.kt
 

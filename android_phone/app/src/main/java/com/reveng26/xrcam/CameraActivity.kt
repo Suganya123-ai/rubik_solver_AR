@@ -165,6 +165,7 @@ class CameraActivity : AppCompatActivity(), UvcCameraHelper.Listener {
                     if (request.isForMainFrame) view.postDelayed({ view.reload() }, 1000)
                 }
             }
+            TutorVoice.attach(this, TutorVoice.PHONE)   // spoken steps and commands (the glasses' page has it first)
             if (server.isNotEmpty()) loadUrl("http://$server/glasses/?camera=remote")
         }
         binding.btnToggleView.setOnClickListener {
