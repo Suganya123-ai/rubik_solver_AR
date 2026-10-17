@@ -12,5 +12,10 @@ git clone -b auto-learn https://github.com/Suganya123-ai/rubik_solver_AR.git && 
 ./autolearn/run_weekly.sh --force      # or a round right now
 ```
 
+**Voice (branch `laptop-voice`):** both tutors say each step out loud and listen for spoken commands,
+as on the glasses (`web/src/voice.ts`, Chrome's speech: click once on the page or press S so Chrome may
+use the microphone, and allow it). Say **next** (done), **repeat**, **scan**, **solve**, **new plan**,
+**stop**, **quiet** / **speak**, **help**. It doesn't listen while it talks.
+
 How it works, what it checks and where the reports are: [autolearn/README.md](autolearn/README.md).
 The other branches' demos (ports 5173-5175, the glasses) are separate and unchanged.
