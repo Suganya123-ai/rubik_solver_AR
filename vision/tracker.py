@@ -323,7 +323,7 @@ class TrackSession:
         self._buffer = []
         # Finished, even if the camera missed a move on the way: three sides in view, each one colour,
         # twice in a row.
-        if self.home_ok and self._looks_solved(obs, visible):
+        if self._looks_solved(obs, visible):
             self._solved_looks = getattr(self, '_solved_looks', 0) + 1
             if self._solved_looks >= 2:
                 self.letters = np.array(solved_state().arr)

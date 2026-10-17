@@ -181,6 +181,17 @@ class PhoneSession:
         reply['followed'] = followed
         out = json.dumps(reply, default=float)
         t5 = time.perf_counter()
+        track = reply.get('track') or {}
+        scan = reply.get('scan') or {}
+        said = (track.get('phase'), track.get('step'), track.get('event') if track.get('event') != 'unsure' else None,
+                track.get('message'), scan.get('event'), scan.get('message'))
+        if (track or scan) and said != getattr(self, '_said', None) and any(said):
+            self._said = said
+            if track:
+                print(f"tracker: {track.get('phase')} move {track.get('step')}/{track.get('total')} "
+                      f"event={track.get('event')} '{track.get('message') or ''}'")
+            else:
+                print(f"scan: event={scan.get('event')} '{scan.get('message') or ''}' sides={scan.get('sides_done')}")
         if found is not None:
             for name, dt in (('picture', t1 - t0), ('follow', t2 - t1), ('read', t3 - t2), ('scan/track', t4 - t3), ('json', t5 - t4)):
                 self._times[name] = self._times.get(name, 0.0) + dt
