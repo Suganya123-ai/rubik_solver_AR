@@ -37,6 +37,7 @@ export function forSpeech(text: string): string {
   return text
     .replace(/\s*\((?:→|Esc|S|N|Enter|[A-Z])\)/g, '')       // key hints like "(→)"
     .replace(/[✓✋🎉⚠↶!]+/gu, '')
+    .replace(/\s*·\s*/g, ', ')
     .replace(/\s*--\s*/g, ', ')
     .replace(/\s*\(([^)]*)\)/g, ', $1')                     // "(facing you)" -> ", facing you"
     .replace(/\s+/g, ' ')
@@ -63,7 +64,7 @@ declare global {
 export class Voice {
   /** Speaking on (the user can say "quiet" / "speak"). */
   on = true;
-  /** The last thing said, for "repeat". */
+  /** The last instruction (what "repeat" says again; help and other replies don't replace it). */
   last = '';
   /** Everything said, newest last (tests read it). */
   readonly said: string[] = [];
@@ -105,6 +106,7 @@ export class Voice {
   say(text: string, force = false, urgent = force): void {
     const t = forSpeech(text);
     if (!t || (!force && (t === this.last || t === this.waiting))) return;
+    if (!force) this.last = t;                        // an instruction (a reply to "help" etc. is not one)
     if (!urgent && performance.now() < this.talkUntil) { this.waiting = t; return; }
     this.waiting = null;
     this.speakNow(t, force);
@@ -115,7 +117,6 @@ export class Voice {
   }
 
   private speakNow(t: string, force: boolean): void {
-    this.last = t;
     this.said.push(t);
     if (!this.on && !force) return;
     // deaf while talking: until the speech says it has finished, or a generous guess of its length
