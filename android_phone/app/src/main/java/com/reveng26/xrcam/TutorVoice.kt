@@ -40,7 +40,9 @@ object TutorVoice {
     private var owner: WeakReference<WebView>? = null
     private var ownerRank = 0
     private var recognizer: SpeechRecognizer? = null
-    private var listening = false
+    private var listening = false      // the page wants commands
+    private var paused = false         // ...but not right now: the tutor is talking
+    private var misses = 0             // sessions in a row that heard nothing (to slow down restarting)
     private lateinit var app: Context
 
     /** Offers the voice to a tutor page (call before it loads). rank: GLASSES or PHONE. */
@@ -54,9 +56,9 @@ object TutorVoice {
                 tts?.setSpeechRate(1.05f)
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(id: String?) {}
-                    override fun onDone(id: String?) = toPage("window.tutorSpoke && tutorSpoke()")
+                    override fun onDone(id: String?) = spoke()
                     @Deprecated("Deprecated in Java")
-                    override fun onError(id: String?) = toPage("window.tutorSpoke && tutorSpoke()")
+                    override fun onError(id: String?) = spoke()
                 })
                 Log.i(TAG, "text-to-speech ready: $ttsReady")
                 pending?.let { say(it) }
@@ -82,7 +84,16 @@ object TutorVoice {
     private fun say(text: String) {
         val engine = tts
         if (engine == null || !ttsReady) { pending = text; return }
+        // The microphone off while talking: listening takes the phone's audio and would cut the voice off
+        // (and must not hear the tutor's own words). Back on when the sentence ends.
+        main.post { pauseListening() }
         engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, "tutor")   // the newest instruction is the one that matters
+    }
+
+    /** A sentence ended: tell the page, and listen again. */
+    private fun spoke() {
+        toPage("window.tutorSpoke && tutorSpoke()")
+        main.postDelayed({ if (tts?.isSpeaking != true) resumeListening() }, 250)
     }
 
     private class Bridge(view: WebView, private val rank: Int) {
@@ -124,17 +135,21 @@ object TutorVoice {
         Log.i(TAG, "listening for commands (${if (onDevice) "on the phone" else "Google's service"})")
         recognizer!!.setRecognitionListener(object : RecognitionListener {
             override fun onResults(results: Bundle?) {
-                val heard = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
-                if (heard.isNotEmpty()) {
-                    Log.i(TAG, "heard: $heard")
-                    // every guess, best first: the page takes the first that is a command
-                    toPage("window.tutorHeard && tutorHeard(${JSONObject.quote(heard.joinToString(" | "))})")
-                }
-                again(200)
+                deliver(results)
+                again(300)
             }
+            // One long session (Android 13+): each phrase comes as a segment, the microphone stays on.
+            override fun onSegmentResults(segmentResults: Bundle) = deliver(segmentResults)
+            override fun onEndOfSegmentedSession() = again(300)
             override fun onError(error: Int) {
-                // no speech / nothing matched: listen again at once; busy: give it a moment
-                again(if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == SpeechRecognizer.ERROR_CLIENT) 1000 else 200)
+                // nothing heard: listen again, more slowly after several in a row (each start opens the
+                // microphone again); busy: give it a moment
+                misses = if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) misses + 1 else 0
+                again(when {
+                    error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == SpeechRecognizer.ERROR_CLIENT -> 1000L
+                    misses > 3 -> 1500L
+                    else -> 400L
+                })
             }
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
@@ -147,22 +162,52 @@ object TutorVoice {
         listenOnce()
     }
 
+    private fun deliver(results: Bundle?) {
+        val heard = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+        if (heard.isEmpty()) return
+        misses = 0
+        Log.i(TAG, "heard: $heard")
+        // every guess, best first: the page takes the first that is a command
+        toPage("window.tutorHeard && tutorHeard(${JSONObject.quote(heard.joinToString(" | "))})")
+    }
+
     private val intent by lazy {
         Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            if (android.os.Build.VERSION.SDK_INT >= 33) putExtra(RecognizerIntent.EXTRA_SEGMENTED_SESSION, true)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 30_000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 30_000L)
         }
     }
 
     private fun listenOnce() {
+        if (!listening || paused) return
         try { recognizer?.startListening(intent) } catch (e: Exception) { Log.w(TAG, "listen failed: ${e.message}"); again(1000) }
     }
 
     private fun again(delayMs: Long) {
-        if (!listening) return
-        main.postDelayed({ if (listening) listenOnce() }, delayMs)
+        if (!listening || paused) return
+        main.removeCallbacks(restart)
+        main.postDelayed(restart, delayMs)
+    }
+
+    private val restart = Runnable { listenOnce() }
+
+    private fun pauseListening() {
+        if (!listening || paused) return
+        paused = true
+        main.removeCallbacks(restart)
+        try { recognizer?.cancel() } catch (_: Exception) {}
+    }
+
+    private fun resumeListening() {
+        if (!listening || !paused) return
+        paused = false
+        misses = 0
+        listenOnce()
     }
 
     private fun stopListening() {

@@ -68,12 +68,14 @@ export class Voice {
   /** Everything said, newest last (tests read it). */
   readonly said: string[] = [];
   private talkUntil = 0;              // not listening until then: the tutor is talking
+  private waiting: string | null = null;   // a routine update said once the current sentence ends
   private listening = false;
   private bridge: Bridge | null = window.TutorVoice ?? null;
 
   constructor(private onCommand: (cmd: Command, heard: string) => void) {
     window.tutorHeard = (text: string) => this.heard(text);
-    window.tutorSpoke = () => { this.talkUntil = performance.now() + 300; };
+    window.tutorSpoke = () => { this.talkUntil = performance.now() + 300; this.next(); };
+    setInterval(() => { if (performance.now() >= this.talkUntil) this.next(); }, 250);   // (no 'done' from the engine)
   }
 
   /** Starts listening for commands (after a click or key press in a browser: microphones need one). */
@@ -98,10 +100,21 @@ export class Voice {
   }
 
   /** Says a sentence when it is new (the screen updates many times a second: only changes are said),
-   *  or again when `force` ("repeat"). */
-  say(text: string, force = false): void {
+   *  or again when `force` ("repeat"). `urgent` (an event: correct, wrong, captured, solved) cuts in;
+   *  anything else waits for the current sentence to end, and only the newest of those is said. */
+  say(text: string, force = false, urgent = force): void {
     const t = forSpeech(text);
-    if (!t || (!force && t === this.last)) return;
+    if (!t || (!force && (t === this.last || t === this.waiting))) return;
+    if (!urgent && performance.now() < this.talkUntil) { this.waiting = t; return; }
+    this.waiting = null;
+    this.speakNow(t, force);
+  }
+
+  private next(): void {
+    if (this.waiting) { const t = this.waiting; this.waiting = null; this.speakNow(t, false); }
+  }
+
+  private speakNow(t: string, force: boolean): void {
     this.last = t;
     this.said.push(t);
     if (!this.on && !force) return;

@@ -367,7 +367,8 @@ export class Flow {
   // ---------- UI helpers ----------
   private card(label: string, chip: string, title: string, text: string, buttons: [string, () => void, string][],
                tone = ''): void {
-    this.voice.say(spoken(label, title, text));
+    // "Hold still…" comes and goes as the cube moves: not said. News (correct, wrong, captured, solved) cuts in.
+    if (!/^Hold still/.test(title)) this.voice.say(spoken(label, title, text), false, /^(✓|Not that|Solved|Lost|New plan)/.test(label));
     this.el.card.hidden = false;
     this.el.card.className = 'card ' + tone;
     this.el['card-label'].textContent = label;
