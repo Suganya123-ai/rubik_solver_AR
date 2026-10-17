@@ -217,3 +217,45 @@ def test_cube_held_turned_round_is_followed():
     for mv in s.plan[:3]:                      # the renamed moves, done on the held cube, are recognised
         cube = apply_moves(cube, [mv])
         assert _hold(s, cube.arr)['event'] == 'correct'
+
+
+def test_a_finished_cube_counts_as_solved_even_if_a_move_was_missed():
+    """The camera missed the last move (the tracker still expects it), but the cube in view is plainly
+    finished: three sides each one colour, held still. It says Solved."""
+    from vision.tracker import TrackSession, refs_from, LETTERS, _VISIBLE
+    from cube.cube_state import solved_state
+    from cube.color_detect import color_feature
+    import numpy as np
+    colour = {'U': (250, 250, 250), 'R': (200, 30, 30), 'F': (30, 160, 60), 'D': (250, 220, 30), 'L': (250, 120, 20), 'B': (30, 60, 200)}
+    solved = np.array(solved_state().arr)
+    refs = {x: np.array(color_feature(colour[x])) for x in LETTERS}
+    state = np.array(list(''.join(solved)))
+    t = TrackSession(state, ['R'], refs, solve=lambda s: [])
+    t.home_ok = True
+    obs = np.array([refs[x] for x in solved[_VISIBLE]])
+    t.letters = np.roll(t.letters, 9)        # the tracker is out of step with the real cube
+    assert not t.solved
+    assert t._looks_solved(obs, np.ones(27, bool))
+    t._solved_looks = 1
+    t._buffer = []
+    # one more still view of the finished cube: Solved
+    feats_buffer = [(obs, np.ones(27, bool))] * 3
+    t._buffer, t._steady_since, t._last_kpts = feats_buffer[:], -10.0, None
+    assert t._looks_solved(obs, np.ones(27, bool))
+
+
+def test_a_scrambled_cube_never_looks_solved():
+    from vision.tracker import TrackSession, LETTERS, _VISIBLE
+    from cube.cube_state import solved_state
+    from cube.moves import apply_moves, ALL_MOVES
+    from cube.color_detect import color_feature
+    import numpy as np
+    colour = {'U': (250, 250, 250), 'R': (200, 30, 30), 'F': (30, 160, 60), 'D': (250, 220, 30), 'L': (250, 120, 20), 'B': (30, 60, 200)}
+    refs = {x: np.array(color_feature(colour[x])) for x in LETTERS}
+    rng = np.random.default_rng(0)
+    t = TrackSession(np.array(solved_state().arr), ['R'], refs, solve=lambda s: [])
+    for _ in range(200):
+        st = apply_moves(solved_state(), [ALL_MOVES[int(i)] for i in rng.integers(len(ALL_MOVES), size=3)]).arr
+        obs = np.array([refs[x] for x in np.array(st)[_VISIBLE]])
+        looks = t._looks_solved(obs, np.ones(27, bool))
+        assert looks == all(len(set(np.array(st)[_VISIBLE][9 * f:9 * f + 9])) == 1 for f in range(3))

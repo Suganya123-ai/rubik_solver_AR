@@ -321,6 +321,16 @@ class TrackSession:
         # Each sticker: the median over the frames where nothing covered it.
         obs = np.array([np.median(feats[clear[:, i], i] if visible[i] else feats[:, i], axis=0) for i in range(27)])
         self._buffer = []
+        # Finished, even if the camera missed a move on the way: three sides in view, each one colour,
+        # twice in a row.
+        if self.home_ok and self._looks_solved(obs, visible):
+            self._solved_looks = getattr(self, '_solved_looks', 0) + 1
+            if self._solved_looks >= 2:
+                self.letters = np.array(solved_state().arr)
+                self.off, self._resume_letters = [], None
+                return self.status('solved', 'Solved!')
+        else:
+            self._solved_looks = 0
         expected = self._expected()
         info = {}
         verdict, moves, new_letters = decide(self.letters, obs, self.refs, expected, visible, info)
@@ -386,6 +396,20 @@ class TrackSession:
         if not self.off:  # e.g. the two moves cancelled each other out
             return self.status()
         return self._undo_or_replan(f'You did {did} instead of {expected}.')
+
+    def _looks_solved(self, obs, visible):
+        """Each of the three sides in view is one colour (its stickers nearest one face's colour, all the
+        uncovered ones), and the three are three different faces that meet at a corner."""
+        ref_mat = np.stack([self.refs[x] for x in LETTERS])
+        nearest = np.linalg.norm(obs[:, None, :] - ref_mat[None], axis=2).argmin(1)   # (27,)
+        sides = []
+        for f in range(3):
+            idx = [i for i in range(9 * f, 9 * f + 9) if visible[i]]
+            if len(idx) < 7 or len(set(nearest[idx])) != 1:
+                return False
+            sides.append(LETTERS[nearest[idx[0]]])
+        opposite = {'U': 'D', 'D': 'U', 'F': 'B', 'B': 'F', 'R': 'L', 'L': 'R'}
+        return len(set(sides)) == 3 and not any(opposite[a] == b for a in sides for b in sides)
 
     def _while_off_track(self, moves, expected):
         for m in moves:

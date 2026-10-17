@@ -52,3 +52,44 @@ def read_three_faces(frame, kpts):
             colours.append((float(r), float(g), float(b)))
         out[face] = colours
     return out
+
+
+_GRID = 5   # read_three_faces_sampled: a grid of this many x this many points in the middle of each sticker
+
+
+def _sample_grid():
+    lo, hi = (1 - SAMPLE_FRACTION) / 2, (1 + SAMPLE_FRACTION) / 2
+    t = np.linspace(lo, hi, _GRID)
+    pts = []
+    for k in range(9):
+        r, c = divmod(k, 3)
+        for v in t:
+            for u in t:
+                pts.append(((c + u) / 3, (r + v) / 3, 1.0))
+    return np.array(pts, np.float64)   # (9 * GRID * GRID, 3), homogeneous unit-square points
+
+
+_SAMPLES = _sample_grid()
+
+
+def read_three_faces_sampled(frame, kpts):
+    """The same as read_three_faces, faster (all 27 stickers at once, for the phone): each sticker's
+    colour is the median of a 5x5 grid of points over the middle of its cell, instead of every pixel
+    there. frame may be any (h, w, 3+) BGR-ordered view."""
+    h, w = frame.shape[:2]
+    out = {}
+    for face, idx in FACE_CORNERS.items():
+        H = cv2.getPerspectiveTransform(_UNIT, np.float32([kpts[i] for i in idx])).astype(np.float64)
+        p = _SAMPLES @ H.T
+        xy = np.round(p[:, :2] / p[:, 2:3]).astype(np.int64).reshape(9, _GRID * _GRID, 2)
+        cells = []
+        for pts in xy:
+            ok = (pts[:, 0] >= 0) & (pts[:, 0] < w) & (pts[:, 1] >= 0) & (pts[:, 1] < h)
+            if not ok.any():
+                cells.append(None)
+                continue
+            px = frame[pts[ok, 1], pts[ok, 0], :3]
+            b, g, r = np.median(px, axis=0)
+            cells.append((float(r), float(g), float(b)))
+        out[face] = cells
+    return out

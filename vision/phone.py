@@ -20,7 +20,12 @@ os.environ.setdefault('RUBIK_RECORD', '0')   # the app's code folder is read-onl
 os.environ.setdefault('RUBIK_HANDS', '0')    # hands, when used, are found by the app
 
 from cube import solver as _solver  # noqa: E402
+from . import live as _live  # noqa: E402
 from .live import build_result  # noqa: E402
+from .reader import read_three_faces_sampled  # noqa: E402
+
+# The phone reads the stickers the faster way (all at once; ~15 ms a frame the other way there).
+_live.read_three_faces = read_three_faces_sampled
 from .live_session import LiveClient, ProtocolError  # noqa: E402
 
 
@@ -79,11 +84,17 @@ class CornerFollower:
         h, w = shape
         return (int(max(0, x0 - m)), int(max(0, y0 - m)), int(min(w, x1 + m)), int(min(h, y1 + m)))
 
+    def _gray(self, picture, box):
+        """The square `box` of the picture, grey (picture: grey, or RGBA as the phone sends it)."""
+        x0, y0, x1, y1 = box
+        part = picture[y0:y1, x0:x1]
+        return self.cv2.cvtColor(part, self.cv2.COLOR_RGBA2GRAY) if part.ndim == 3 else part.copy()
+
     def seen(self, gray, kpts, confidence):
         """The model found the cube here: start following from this frame."""
         cv2 = self.cv2
-        self.box = x0, y0, x1, y1 = self._box(kpts, gray.shape)
-        self.crop = gray[y0:y1, x0:x1].copy()
+        self.box = x0, y0, x1, y1 = self._box(kpts, gray.shape[:2])
+        self.crop = self._gray(gray, self.box)
         mask = np.zeros(self.crop.shape, np.uint8)
         local = kpts - [x0, y0]
         centre = local.mean(0)
@@ -98,7 +109,7 @@ class CornerFollower:
         if self.crop is None or self.points is None or len(self.points) < self.MIN_POINTS:
             return None
         x0, y0, x1, y1 = self.box
-        now = gray[y0:y1, x0:x1]                      # the same square in this frame
+        now = self._gray(gray, self.box)              # the same square in this frame
         lk = dict(winSize=(15, 15), maxLevel=2, criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 15, 0.05))
         fwd, ok1, _ = cv2.calcOpticalFlowPyrLK(self.crop, now, self.points, None, **lk)
         back, ok2, _ = cv2.calcOpticalFlowPyrLK(now, self.crop, fwd, None, **lk)
@@ -113,8 +124,8 @@ class CornerFollower:
         kpts = ((self.kpts - [x0, y0]) @ m[:, :2].T + m[:, 2] + [x0, y0]).astype(np.float32)
         # carry on from this frame: the square moves with the cube, the points that agreed come along
         pts = fwd[good][inliers[:, 0] == 1].reshape(-1, 2) + [x0, y0]
-        self.box = nx0, ny0, nx1, ny1 = self._box(kpts, gray.shape)
-        self.crop = gray[ny0:ny1, nx0:nx1].copy()
+        self.box = nx0, ny0, nx1, ny1 = self._box(kpts, gray.shape[:2])
+        self.crop = self._gray(gray, self.box)
         inside = (pts[:, 0] >= nx0) & (pts[:, 0] < nx1) & (pts[:, 1] >= ny0) & (pts[:, 1] < ny1)
         self.points = (pts[inside] - [nx0, ny0]).astype(np.float32).reshape(-1, 1, 2)
         self.kpts = kpts
@@ -143,11 +154,10 @@ class PhoneSession:
         """
         t0 = time.perf_counter()
         rgba = np.frombuffer(_as_bytes(pixels), np.uint8).reshape(height, width, 4)
-        frame = np.ascontiguousarray(rgba[:, :, 2::-1])  # BGR, as the rest of the code expects
+        frame = rgba[:, :, 2::-1]  # BGR, as the rest of the code expects (a view: no copy)
         t1 = time.perf_counter()
         found, followed = None, False
-        import cv2
-        gray = cv2.cvtColor(rgba, cv2.COLOR_RGBA2GRAY)
+        gray = rgba    # the follower makes grey only the square around the cube
         if keypoints is not None:
             found = (np.asarray(list(keypoints), np.float32).reshape(7, 2), float(confidence))
             if found[1] >= 0.5:
