@@ -19,7 +19,9 @@ type ScanStatus = { phase: string; instruction: string | null; steady: number; n
 type ScanResult = { colors: Record<string, string[]>; doubtful: string[]; valid: boolean; centers: Record<string, string> };
 export type Track = { phase: string; step: number; total: number; move: string | null; undo: string[];
   plan_move: string | null; event: string | null; message: string | null; state: string;
-  face_colors: Record<string, string>; steady: number; needed: number };
+  face_colors: Record<string, string>; steady: number; needed: number;
+  /** The right side turned by the wrong amount: [what was done, what was asked]; the move shown is the one-turn fix. */
+  fix?: [string, string] | null };
 
 const FACES = ['U', 'R', 'F', 'D', 'L', 'B'];
 const NET: Record<string, [number, number]> = { U: [1, 0], L: [0, 1], F: [1, 1], R: [2, 1], B: [3, 1], D: [1, 2] };
@@ -34,7 +36,7 @@ function forSpeechLine(s: string): string {
 /** What the voice says for a card: its label when it is news ("Move 3 of 18", "Correct"), the
  *  title and the text, without what only makes sense on screen. */
 function spoken(label: string, title: string, text: string): string {
-  const news = /^(Move|✓|Not that|Undo|Lost|Solved|Get ready|Got it|New plan|Scan|Ready)/.test(label) ? `${label}. ` : '';
+  const news = /^(Move|✓|Not that|Almost|Undo|Lost|Solved|Get ready|Got it|New plan|Scan|Ready)/.test(label) ? `${label}. ` : '';
   const body = text.replace(/\s*Then hold the cube still\.?/g, '').replace(/\(move (\d+) of (\d+)\)/, 'Next is move $1 of $2.');
   return `${news}${title}. ${body}`;
 }
@@ -375,6 +377,21 @@ export class Flow {
     }
     const m = moveWords(t.move ?? '', t.face_colors);
     const chip = `<i style="background:${SWATCH[m.colour] ?? '#888'}"></i>`;
+    if (undoing && t.fix) {
+      // The right side, the wrong amount: one turn of that side puts it back on the plan (no undo, no redo).
+      const [did, asked] = t.fix;
+      const amount = (mv: string) => mv.endsWith('2') ? 'twice' : mv.endsWith("'") ? 'once the other way' : 'once';
+      const side = describe(asked, t.face_colors).colour;
+      const why = `You turned the ${side} side ${amount(did)}; it needed ${amount(asked)}.`;
+      this.el.popup.hidden = false;
+      this.el['popup-move'].innerHTML = `${chip} ${m.title}`;
+      this.el['popup-text'].textContent = `${why} ${m.how} Then the plan carries on.`;
+      if (t.event === 'wrong' || now > this.holdUntil) {
+        this.card('Almost -- fix the turn', chip, m.title, `${why} ${m.how}`, buttons, 'bad');
+        if (t.event === 'wrong') this.holdUntil = now + 4000;
+      }
+      return;
+    }
     if (undoing) {
       const left = t.undo.length;
       this.el.popup.hidden = false;
@@ -431,7 +448,7 @@ export class Flow {
   private card(label: string, chip: string, title: string, text: string, buttons: [string, () => void, string][],
                tone = ''): void {
     // "Hold still…" comes and goes as the cube moves: not said. News (correct, wrong, captured, solved) cuts in.
-    if (!/^Hold still/.test(title)) this.voice.say(spoken(label, title, text), false, /^(✓|Not that|Solved|Lost|New plan)/.test(label));
+    if (!/^Hold still/.test(title)) this.voice.say(spoken(label, title, text), false, /^(✓|Not that|Almost|Solved|Lost|New plan)/.test(label));
     this.shown = forSpeechLine(`${label}. ${title}. ${text}`);
     this.el.card.hidden = false;
     this.el.card.className = 'card ' + tone;

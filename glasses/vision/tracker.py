@@ -64,6 +64,14 @@ def push_mistake(stack, move):
         stack.append(move)
 
 
+def amount_fix(done, asked):
+    """The right side turned by the wrong amount (done R2, asked R): the one turn of that side that goes
+    from where the cube is to where the plan wanted (here R': one back), instead of undoing what was done
+    and doing the move again. None if no turn is needed (they are the same)."""
+    q = (_quarter_turns(asked) - _quarter_turns(done)) % 4
+    return asked[0] + {1: '', 2: '2', 3: "'"}[q] if q else None
+
+
 def undo_moves(stack):
     """The moves that take the cube back to where the mistakes started."""
     return [inverse(m) for m in reversed(stack)]
@@ -192,6 +200,7 @@ class TrackSession:
         self._lost_since = None
         self._lost_reported = False
         self.history = []
+        self.fixing = None             # (done, asked) while the move shown is an amount fix (amount_fix)
 
     @property
     def solved(self):
@@ -257,8 +266,9 @@ class TrackSession:
         elif not self.home_ok:
             phase = 'home'
         else:
-            phase = 'undo' if self.off else 'tracking'
+            phase = 'undo' if self.off or self.fixing else 'tracking'
         return {'phase': phase, 'undo': undo_moves(self.off), 'plan_move': self._plan_move(),
+                'fix': list(self.fixing) if self.fixing and not self.off else None,
                 'step': self.step + 1, 'total': len(self.plan), 'move': expected,
                 'steady': self._steady_progress(), 'needed': 10, 'event': event, 'message': message,
                 'state': ''.join(self.letters), 'face_colors': self.face_colors}
@@ -275,11 +285,13 @@ class TrackSession:
                 return self.status('undone', f'Back on track. Now do {self._plan_move()}.')
         else:
             self.step += 1
+            self.fixing = None
         return self.status('correct', 'Marked as done.')
 
     def replan(self):
         """Gives up on undoing and solves again from where the cube is now."""
         self.off, self._resume_letters = [], None
+        self.fixing = None
         if not self.solved:
             self.plan = self.solve(CubeState(self.letters))
             self.step = 0
@@ -381,7 +393,18 @@ class TrackSession:
             moves, expected = moves[1:], self._plan_move()
         if not self.off and moves == (expected,):
             self.step += 1
+            if self.fixing:
+                self.fixing = None
+                return self.status('correct', 'Back on track.')
             return self.status('correct')
+        if not self.off and expected and len(moves) == 1 and moves[0][0] == expected[0]:
+            # The right side, the wrong amount (twice instead of once, the other way...): one turn of that side
+            # from here reaches where the plan wanted, so that is what is shown, then the plan carries on.
+            fix = amount_fix(moves[0], expected)
+            asked = self.fixing[1] if self.fixing else expected
+            self.plan[self.step] = fix
+            self.fixing = (moves[0], asked)
+            return self.status('wrong', f'You did {moves[0]} instead of {expected}. Fix it with {fix}, then carry on.')
         if self.off:
             return self._while_off_track(moves, expected)
         # A different move from the one asked for.

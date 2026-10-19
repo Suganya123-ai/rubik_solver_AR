@@ -217,3 +217,73 @@ def test_cube_held_turned_round_is_followed():
     for mv in s.plan[:3]:                      # the renamed moves, done on the held cube, are recognised
         cube = apply_moves(cube, [mv])
         assert _hold(s, cube.arr)['event'] == 'correct'
+
+
+def _amount_case(want_half):
+    """A scramble and a step whose planned move is a quarter turn (or a half turn)."""
+    for seed in range(40):
+        state = _scrambled(100 + seed)
+        plan = solve(state)[0]
+        for i, m in enumerate(plan[:-1]):
+            if m.endswith('2') == want_half and i > 0:
+                return state, i
+    raise AssertionError('no such plan')
+
+
+def _play_to(s, cube, step):
+    """Follows the plan correctly up to `step`."""
+    _hold(s, s.letters)
+    while s.step < step:
+        cube = apply_moves(cube, [s.plan[s.step]])
+        assert _hold(s, cube.arr)['event'] == 'correct'
+    return cube
+
+
+def test_right_side_wrong_amount_is_fixed_with_one_turn():
+    """Asked once, turned twice -> one turn back; asked twice, turned once -> once more; asked once,
+    turned the other way -> a half turn. Then the plan carries on, with no undo and no redo."""
+    from vision.tracker import amount_fix
+    for want_half, did, fix in ((False, lambda m: m[0] + '2', lambda m: m[0] if m.endswith("'") else m[0] + "'"),
+                                (True, lambda m: m[0], lambda m: m[0]),
+                                (False, lambda m: m[0] if m.endswith("'") else m[0] + "'", lambda m: m[0] + '2')):
+        state, step = _amount_case(want_half)
+        s = _session(state)
+        plan = list(s.plan)
+        cube = _play_to(s, state, step)
+        asked = plan[step]
+        cube = apply_moves(cube, [did(asked)])
+        st = _hold(s, cube.arr)
+        assert st['event'] == 'wrong' and st['phase'] == 'undo', (asked, st)
+        assert st['move'] == fix(asked) == amount_fix(did(asked), asked) and st['fix'] == [did(asked), asked]
+        assert st['undo'] == []                                  # nothing to undo: just the one fix
+        cube = apply_moves(cube, [st['move']])                   # the one turn
+        st = _hold(s, cube.arr)
+        assert st['event'] == 'correct' and st['message'] == 'Back on track.' and st['phase'] == 'tracking'
+        assert s.step == step + 1 and st['move'] == plan[step + 1] and st['fix'] is None
+        while not s.solved:                                      # and the rest of the same plan solves it
+            cube = apply_moves(cube, [s.plan[s.step]])
+            _hold(s, cube.arr)
+        assert ''.join(cube.arr) == ''.join(solved_state().arr)
+
+
+def test_a_wrong_amount_while_fixing_updates_the_fix():
+    state, step = _amount_case(False)
+    s = _session(state)
+    cube = _play_to(s, state, step)
+    asked = s.plan[step]
+    cube = apply_moves(cube, [asked[0] + '2'])                   # twice instead of once
+    st = _hold(s, cube.arr)
+    cube = apply_moves(cube, [st['move'][0] + '2'])              # then the fix overdone too
+    st = _hold(s, cube.arr)
+    assert st['event'] == 'wrong' and st['fix'][1] == asked and st['undo'] == []
+    cube = apply_moves(cube, [st['move']])
+    assert _hold(s, cube.arr)['event'] == 'correct' and s.step == step + 1
+
+
+def test_another_side_still_gets_undo():
+    state = _scrambled(7)
+    s = _session(state)
+    cube = _play_to(s, state, 1)
+    wrong = _wrong_move(s)
+    st = _hold(s, apply_moves(cube, [wrong]).arr)
+    assert st['event'] == 'wrong' and st['undo'] and st['fix'] is None

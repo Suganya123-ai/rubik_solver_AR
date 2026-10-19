@@ -321,6 +321,12 @@ class LiveClient:
                 lines.append('Stage: about to start solving; waiting for the cube to be held as in the first scan view.')
             else:
                 lines.append(f"Stage: solving. Move {st['step']} of {st['total']}.")
+                if getattr(t, 'fixing', None) and not t.off:
+                    did, asked = t.fixing
+                    amount = lambda m: 'twice' if m.endswith('2') else ('once the other way' if m.endswith("'") else 'once')   # noqa: E731
+                    lines.append(f"The last turn was the right side but the wrong amount: the {c.get(asked[0], asked[0])} side was "
+                                 f"turned {amount(did)}, it needed {amount(asked)}. One turn of that side fixes it (the move asked "
+                                 f"for now), then the plan carries on: no undo needed.")
                 if t.off:
                     lines.append(f"There is a mistake to undo first: {', '.join(side(m) for m in st['undo'])}; then the plan carries on.")
                 elif st['move']:
