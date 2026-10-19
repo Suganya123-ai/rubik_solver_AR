@@ -124,3 +124,10 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); overf
 
 /* several colour swatches in the card chip (side 1's centres during scan 2) */
 .chip i + i { margin-left: 4px; }
+
+/* The assistant's answer to a spoken question (flow.ts ask): above the instruction card. */
+.assistant { position: fixed; left: 50%; bottom: 210px; transform: translateX(-50%); width: min(560px, calc(100vw - 32px));
+  background: rgba(10, 14, 20, 0.86); border: 1px solid rgba(94, 230, 255, 0.45); border-radius: 12px; padding: 10px 14px;
+  color: #e9f6fb; font: 15px/1.4 Inter, system-ui, sans-serif; z-index: 30; }
+.assistant-q { color: #9fdcea; font-size: 13px; margin-bottom: 4px; }
+.stats-report { margin-top: 10px; font-size: 13px; line-height: 1.45; color: #dfeff4; max-width: 300px; }

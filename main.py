@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -115,6 +116,23 @@ async def live_socket(ws: WebSocket):
     await ws.accept()
     client = LiveClient(name=f'{ws.client.host}:{ws.client.port}' if ws.client else 'client')
     log.info('%s connected', client.name)
+    sending = asyncio.Lock()   # the assistant's answers are sent from their own tasks
+
+    async def send(reply):
+        async with sending:
+            await ws.send_json(reply)
+
+    async def answer(kind, command):
+        """A question or a report (vision/assistant.py: a second or more): answered beside the frame
+        loop, so the camera never waits for the model."""
+        try:
+            await send(await run_in_threadpool(client.ask if kind == 'ask' else client.report, command))
+        except ProtocolError as e:
+            await send({'type': 'error', 'code': 'BAD_REQUEST', 'message': str(e)})
+        except Exception:
+            log.exception('%s: assistant failed', client.name)
+            await send({'type': 'answer', 'text': "Sorry, I can't answer that right now."})
+
     try:
         while True:
             message = await ws.receive()
@@ -124,7 +142,11 @@ async def live_socket(ws: WebSocket):
                 if message.get('bytes') is not None:
                     reply = await run_in_threadpool(client.handle_frame, message['bytes'])
                 elif message.get('text'):
-                    reply = await run_in_threadpool(client.handle_command, json.loads(message['text']))
+                    command = json.loads(message['text'])
+                    if isinstance(command, dict) and command.get('type') in ('ask', 'report'):
+                        asyncio.create_task(answer(command['type'], command))
+                        continue
+                    reply = await run_in_threadpool(client.handle_command, command)
                 else:
                     continue
             except (ProtocolError, ValueError) as e:  # bad input: tell the client, keep the connection
@@ -132,7 +154,7 @@ async def live_socket(ws: WebSocket):
             except Exception:  # a bug: log it, tell the client, keep the connection
                 log.exception('%s: error handling a message', client.name)
                 reply = {'type': 'error', 'code': 'SERVER', 'message': 'internal error, see server log'}
-            await ws.send_json(reply)
+            await send(reply)
     except WebSocketDisconnect:
         pass
     log.info('%s disconnected', client.name)

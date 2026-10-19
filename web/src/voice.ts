@@ -26,6 +26,13 @@ const WORDS: [Command, RegExp][] = [
 export const HELP = 'You can say: next, when you have done the move. Repeat, to hear it again. ' +
   'Scan, solve, new plan, or stop. Quiet, to turn the voice off, and speak, to turn it back on.';
 
+/** A question for the assistant ("why this move?", "what did I do wrong?"), rather than a command:
+ *  starts with a question word and has a few words ("what" alone is "repeat"). */
+export function isQuestion(heard: string): boolean {
+  const words = heard.toLowerCase().replace(/[^a-z' ]/g, ' ').trim().split(/\s+/).filter(Boolean);
+  return words.length >= 3 && /^(why|what|what's|how|which|where|when|who|is|are|can|could|should|do|does|did|will|would|tell|explain)$/.test(words[0]);
+}
+
 export function parseCommand(heard: string): Command | null {
   const text = ` ${heard.toLowerCase().replace(/[^a-z ]/g, ' ')} `;
   for (const [cmd, re] of WORDS) if (re.test(text)) return cmd;
@@ -73,7 +80,7 @@ export class Voice {
   private listening = false;
   private bridge: Bridge | null = window.TutorVoice ?? null;
 
-  constructor(private onCommand: (cmd: Command, heard: string) => void) {
+  constructor(private onCommand: (cmd: Command, heard: string) => void, private onQuestion?: (question: string) => void) {
     window.tutorHeard = (text: string) => this.heard(text);
     window.tutorSpoke = () => { this.talkUntil = performance.now() + 300; this.next(); };
     setInterval(() => { if (performance.now() >= this.talkUntil) this.next(); }, 250);   // (no 'done' from the engine)
@@ -133,6 +140,8 @@ export class Voice {
 
   private heard(text: string): void {
     if (performance.now() < this.talkUntil) return;   // its own voice
+    const best = text.split(' | ')[0];                  // the app sends every guess, best first
+    if (this.onQuestion && isQuestion(best)) { this.onQuestion(best); return; }
     const cmd = parseCommand(text);
     if (!cmd) return;
     if (cmd === 'quiet') { this.on = false; window.speechSynthesis?.cancel(); return; }
