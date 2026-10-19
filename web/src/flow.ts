@@ -89,15 +89,20 @@ export class Flow {
       </div>
       <div class="turning" id="turning" hidden>✋ Turning… hold still when you're done</div>
       <div class="stats" id="stats" hidden></div>
+      <div class="mic" id="mic"></div>
       <div class="assistant" id="assistant" hidden><div class="assistant-q" id="assistant-q"></div><div id="assistant-a"></div></div>`;
     for (const id of ['card', 'card-label', 'card-chip', 'card-title', 'card-text', 'card-steady', 'card-buttons',
       'review', 'review-title', 'net', 'palette', 'review-buttons', 'popup', 'popup-move', 'popup-text', 'popup-close',
-      'progress', 'bar-progress', 'bar-cube', 'percent', 'turning', 'stats', 'assistant', 'assistant-q', 'assistant-a']) {
+      'progress', 'bar-progress', 'bar-cube', 'percent', 'turning', 'stats', 'assistant', 'assistant-q', 'assistant-a', 'mic']) {
       this.el[id] = root.querySelector('#' + id)!;
     }
     this.el['popup-close'].onclick = () => (this.el.popup.hidden = true);
-    if (window.TutorVoice) this.voice.listen();          // the glasses app: no click needed for the microphone
-    else addEventListener('pointerdown', () => this.voice.listen(), { once: true });
+    // The microphone: on at once if the browser allows it, else after the first click or key press.
+    this.voice.onMic = (m) => this.showMic(m);
+    this.voice.onHeard = (heard, understood) => this.showMic(this.voice.mic, heard, understood);
+    this.showMic('off');
+    this.voice.listen();
+    for (const ev of ['pointerdown', 'keydown'] as const) addEventListener(ev, () => this.voice.listen());
     for (const colour of PALETTE) {
       const b = document.createElement('button');
       b.style.background = SWATCH[colour];
@@ -169,6 +174,19 @@ export class Flow {
     this.showAssistant(question, 'Thinking…');
     this.tone(660, 0, 0.08);
   }
+
+  /** The microphone indicator: listening or not, and what was last heard (for a few seconds). */
+  private showMic(state: string, heard?: string, understood?: string | null): void {
+    const el = this.el.mic;
+    const base: Record<string, string> = { listening: '🎤 Listening: say “scan”, “next”, “repeat”, or ask a question',
+      'needs-click': '🎤 Click anywhere to turn on the voice', blocked: '🎤 Microphone blocked: allow it in the address bar',
+      unsupported: '🎤 Voice commands need Chrome', off: '🎤 Voice starting…' };
+    el.className = 'mic ' + state;
+    el.textContent = heard ? `🎤 Heard “${heard}”${understood ? ` → ${understood}` : ' (not a command)'}` : (base[state] ?? '');
+    clearTimeout(this.micTimer);
+    if (heard) this.micTimer = window.setTimeout(() => this.showMic(this.voice.mic), 4000);
+  }
+  private micTimer = 0;
 
   private showAssistant(question: string, answer: string): void {
     this.el.assistant.hidden = false;

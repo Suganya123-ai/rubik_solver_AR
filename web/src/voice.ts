@@ -30,8 +30,14 @@ export const HELP = 'You can say: next, when you have done the move. Repeat, to 
  *  starts with a question word and has a few words ("what" alone is "repeat"). */
 export function isQuestion(heard: string): boolean {
   const words = heard.toLowerCase().replace(/[^a-z' ]/g, ' ').trim().split(/\s+/).filter(Boolean);
-  return words.length >= 3 && /^(why|what|what's|how|which|where|when|who|is|are|can|could|should|do|does|did|will|would|tell|explain)$/.test(words[0]);
+  if (words.length < 3) return false;
+  // a polite request for a command ("can you start the scan", "could you repeat that") is the command
+  if (/^(can|could|would|will|please)$/.test(words[0]) && parseCommand(heard)) return false;
+  return /^(why|what|what's|how|which|where|when|who|is|are|can|could|should|do|does|did|will|would|tell|explain)$/.test(words[0]);
 }
+
+/** Whether the microphone is listening (shown on screen, so a silent page never leaves the person guessing). */
+export type MicState = 'off' | 'listening' | 'needs-click' | 'blocked' | 'unsupported';
 
 export function parseCommand(heard: string): Command | null {
   const text = ` ${heard.toLowerCase().replace(/[^a-z ]/g, ' ')} `;
@@ -79,6 +85,16 @@ export class Voice {
   private waiting: string | null = null;   // a routine update said once the current sentence ends
   private listening = false;
   private bridge: Bridge | null = window.TutorVoice ?? null;
+  mic: MicState = 'off';
+  /** Told when the microphone state changes, and what was heard (for the on-screen indicator). */
+  onMic: ((state: MicState) => void) | null = null;
+  onHeard: ((text: string, understood: string | null) => void) | null = null;
+
+  private setMic(state: MicState): void {
+    if (state === this.mic) return;
+    this.mic = state;
+    this.onMic?.(state);
+  }
 
   constructor(private onCommand: (cmd: Command, heard: string) => void, private onQuestion?: (question: string) => void) {
     window.tutorHeard = (text: string) => this.heard(text);
@@ -86,13 +102,14 @@ export class Voice {
     setInterval(() => { if (performance.now() >= this.talkUntil) this.next(); }, 250);   // (no 'done' from the engine)
   }
 
-  /** Starts listening for commands (after a click or key press in a browser: microphones need one). */
+  /** Starts listening for commands. A browser may refuse until the page has been clicked: then the
+   *  state says 'needs-click', and the next click or key press tries again. */
   listen(): void {
     if (this.listening) return;
     this.listening = true;
-    if (this.bridge) { this.bridge.listen(true); return; }
+    if (this.bridge) { this.bridge.listen(true); this.setMic('listening'); return; }
     const Rec = window.SpeechRecognition ?? window.webkitSpeechRecognition;
-    if (!Rec) return;
+    if (!Rec) { this.setMic('unsupported'); return; }
     const rec = new Rec();
     rec.continuous = true;
     rec.interimResults = false;
@@ -102,9 +119,16 @@ export class Voice {
         if (e.results[i].isFinal) this.heard(e.results[i][0].transcript);
       }
     };
+    (rec as unknown as { onstart: () => void }).onstart = () => this.setMic('listening');
     rec.onend = () => { if (this.listening) setTimeout(() => { try { rec.start(); } catch { /* already on */ } }, 300); };
-    rec.onerror = () => { /* onend follows and starts it again */ };
-    try { rec.start(); } catch { this.listening = false; }
+    rec.onerror = (e) => {
+      // not allowed: blocked in the site settings, or (before any click) waiting for one; onend follows otherwise
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        this.listening = false;
+        this.setMic(navigator.userActivation?.hasBeenActive ? 'blocked' : 'needs-click');
+      }
+    };
+    try { rec.start(); } catch { this.listening = false; this.setMic('needs-click'); }
   }
 
   /** Says a sentence when it is new (the screen updates many times a second: only changes are said),
@@ -128,21 +152,28 @@ export class Voice {
     if (!this.on && !force) return;
     // deaf while talking: until the speech says it has finished, or a generous guess of its length
     this.talkUntil = performance.now() + 1000 + t.length * 75;
-    if (this.bridge) { this.bridge.say(t); return; }
-    const synth = window.speechSynthesis;
-    if (!synth) { this.talkUntil = 0; return; }
-    synth.cancel();                                   // the newest instruction is the one that matters
-    const u = new SpeechSynthesisUtterance(t);
-    u.rate = 1.05;
-    u.onend = u.onerror = () => { this.talkUntil = performance.now() + 300; };
-    synth.speak(u);
+    // Speech must never break the tutor: if the speech engine fails, the screen carries on without it.
+    try {
+      if (this.bridge) { this.bridge.say(t); return; }
+      const synth = window.speechSynthesis;
+      if (!synth) { this.talkUntil = 0; return; }
+      synth.cancel();                                 // the newest instruction is the one that matters
+      const u = new SpeechSynthesisUtterance(t);
+      u.rate = 1.05;
+      u.onend = u.onerror = () => { this.talkUntil = performance.now() + 300; };
+      synth.speak(u);
+    } catch (e) {
+      this.talkUntil = 0;
+      console.warn('speech failed', e);
+    }
   }
 
   private heard(text: string): void {
     if (performance.now() < this.talkUntil) return;   // its own voice
     const best = text.split(' | ')[0];                  // the app sends every guess, best first
-    if (this.onQuestion && isQuestion(best)) { this.onQuestion(best); return; }
+    if (this.onQuestion && isQuestion(best)) { this.onHeard?.(best, 'question'); this.onQuestion(best); return; }
     const cmd = parseCommand(text);
+    this.onHeard?.(best, cmd);
     if (!cmd) return;
     if (cmd === 'quiet') { this.on = false; window.speechSynthesis?.cancel(); return; }
     if (cmd === 'speak') { this.on = true; this.say(this.last || 'Voice on.', true); return; }
