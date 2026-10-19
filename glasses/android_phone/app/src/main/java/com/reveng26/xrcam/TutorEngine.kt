@@ -114,7 +114,44 @@ class TutorEngine(
     private val pythonLock = Any()   // one frame or command in the Python code at a time
     private val server = server(context)
 
-    private fun command(text: String): String? = synchronized(pythonLock) { session?.callAttr("command", text)?.toString() }
+    private fun command(text: String): String? {
+        // A spoken question or the end-of-solve report: answered on its own thread (a second or two for the
+        // language model), so the frames never wait; the answer goes to the pages when it is ready.
+        val type = try { org.json.JSONObject(text).optString("type") } catch (_: Exception) { "" }
+        if (type == "ask" || type == "report") {
+            asking.post { answer(type, text) }
+            return null
+        }
+        return synchronized(pythonLock) { session?.callAttr("command", text)?.toString() }
+    }
+
+    private val askThread = HandlerThread("Assistant").also { it.start() }
+    private val asking = Handler(askThread.looper)
+    private val assistant by lazy { TutorAssistant(context) }
+
+    private fun answer(type: String, text: String) {
+        val question = try { org.json.JSONObject(text).optString("text") } catch (_: Exception) { "" }
+        fun spoken(answer: String) = org.json.JSONObject().put("type", "answer").put("question", question).put("text", answer)
+        val reply: org.json.JSONObject? = try {
+            if (!assistant.available) {
+                if (type == "ask") spoken("Questions need the assistant, and it isn't set up on this phone.") else null
+            } else {
+                val req = org.json.JSONObject(synchronized(pythonLock) { session!!.callAttr("assistant_request", text).toString() })
+                val messages = req.optJSONArray("messages")
+                if (messages == null) null else {
+                    val out = assistant.chat(messages, req.optInt("max_tokens", 120))
+                    if (type == "ask") {
+                        synchronized(pythonLock) { session!!.callAttr("assistant_answered", req.optString("question"), out) }
+                        spoken(out)
+                    } else org.json.JSONObject().put("type", "report").put("text", out)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "assistant: no answer (${e.message})")
+            if (type == "ask") spoken("Sorry, I can't answer questions right now. Say repeat to hear the step again.") else null
+        }
+        reply?.let { server.broadcast(it.toString()) }
+    }
 
     // What is reported on the phone's status line.
     private var frames = 0
@@ -156,6 +193,7 @@ class TutorEngine(
             finder?.close()
             thread.quitSafely()
         }
+        askThread.quitSafely()
     }
 
     /** Ready for the next picture: [offer] fills a free buffer from the decoder. */

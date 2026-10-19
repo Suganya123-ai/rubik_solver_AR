@@ -164,6 +164,9 @@ body.display-only .card { bottom: 6vh; }
 body.display-only .card-main { font-size: 34px; }
 body.display-only .card-text { font-size: 20px; }
 body.display-only .card-label { font-size: 14px; }
+/* On the glasses: the answer box a little higher (the card is larger there), the microphone note small. */
+body.display-only .assistant { bottom: 30vh; font-size: 20px; }
+body.display-only .mic { font-size: 14px; }
 
 /* On the glasses the ghost cube is small and fixed top-right: a lighter frame and label. */
 body.glasses .ghost-label { font-size: 8px; bottom: 2px; }
@@ -174,3 +177,15 @@ body.glasses .progress { top: 70px; }
 body.remote .card, body.remote .review, body.remote .popup, body.remote .hud-stats, body.remote .hud-hint,
 body.remote #controls { backdrop-filter: none; -webkit-backdrop-filter: none; }
 body.remote .card { background: rgba(6, 14, 20, .86); }
+
+/* The assistant's answer to a spoken question (flow.ts ask): above the instruction card. */
+.assistant { position: fixed; left: 50%; bottom: 210px; transform: translateX(-50%); width: min(560px, calc(100vw - 32px));
+  background: rgba(10, 14, 20, 0.86); border: 1px solid rgba(94, 230, 255, 0.45); border-radius: 12px; padding: 10px 14px;
+  color: #e9f6fb; font: 15px/1.4 Inter, system-ui, sans-serif; z-index: 30; }
+.assistant-q { color: #9fdcea; font-size: 13px; margin-bottom: 4px; }
+.stats-report { margin-top: 10px; font-size: 13px; line-height: 1.45; color: #dfeff4; max-width: 300px; }
+/* The microphone indicator (flow.ts showMic). */
+.mic { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); max-width: calc(100vw - 32px); padding: 6px 12px; border-radius: 999px; z-index: 31;
+  font: 13px/1.3 Inter, system-ui, sans-serif; color: #e9f6fb; background: rgba(10, 14, 20, 0.8); border: 1px solid rgba(255, 255, 255, 0.2); }
+.mic.listening { border-color: rgba(61, 255, 154, 0.6); }
+.mic.needs-click, .mic.blocked { border-color: rgba(255, 176, 32, 0.8); color: #ffd28a; cursor: pointer; }

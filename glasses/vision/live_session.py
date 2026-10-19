@@ -61,6 +61,16 @@ def _scan_json(result):
             'valid': result['valid'], 'centers': result['centers']}
 
 
+def _in_colours(message, colours):
+    """"You did U instead of R. Undo it: U'..." -> "You turned the white side instead of the red side." """
+    import re
+    did = re.match(r"You did (.+?) instead of (\S+?)\.", message or '')
+    if not did:
+        return message or ''
+    name = lambda m: f"the {colours.get(m[0], m[0])} side"   # noqa: E731
+    return f"turned {' then '.join(name(m) for m in did.group(1).split(' then '))} instead of {name(did.group(2))}"
+
+
 def _describe(status):
     if status.get('move'):
         status['description'] = enrich([status['move']], [('solving', 1)])[0].description
@@ -81,6 +91,8 @@ class LiveClient:
         self._miss_saved = 0.0    # when a "cube not found" frame was last saved
         self._seen = {}           # frame counts since the last log line
         self._logged_at = time.monotonic()
+        self.stats = None         # this solve: start time, moves right / wrong / undone, help used (the assistant)
+        self._assistant = None    # vision/assistant.py, made when first asked
 
     # ---------- frames ----------
     def handle_frame(self, data):
@@ -122,6 +134,12 @@ class LiveClient:
                                      'hands': len(result.get('hands') or [])}, jpeg)
             result['track'] = _describe(self.track.feed(result))
             event = result['track']['event']
+            if self.stats is not None and event in ('correct', 'wrong', 'undone', 'lost', 'solved'):
+                self.stats[event] = self.stats.get(event, 0) + 1
+                if event == 'wrong':
+                    self.stats.setdefault('mistakes', []).append(result['track'].get('message'))
+                if event == 'solved':
+                    self.stats['seconds'] = round(time.monotonic() - self.stats['start'])
             if event and event != 'unsure':
                 log.info('%s: %s %s (move %s/%s)', self.name, event, result['track'].get('message') or '',
                          result['track']['step'], result['track']['total'])
@@ -252,6 +270,7 @@ class LiveClient:
                                   solve=lambda s: solve(s)[0], face_colors={f: colors[f][4] for f in FACES},
                                   on_mistake=on_mistake)
         log.info('%s: solving, %d moves: %s', self.name, len(moves), ' '.join(moves))
+        self.stats = {'start': time.monotonic(), 'plan': len(moves)}
         if os.environ.get('RUBIK_RECORD', '1') != '0':
             self.recorder = SessionRecorder({'start': True, 'state': letters, 'plan': list(moves),
                                              'face_colors': self.track.face_colors, 'on_mistake': on_mistake,
@@ -263,6 +282,8 @@ class LiveClient:
     def _cmd_track_skip(self, _):
         if self.track is None:
             raise ProtocolError('not tracking')
+        if self.stats is not None:
+            self.stats['skips'] = self.stats.get('skips', 0) + 1
         return {'type': 'track', 'track': _describe(self.track.skip())}
 
     def _cmd_track_replan(self, _):
@@ -273,6 +294,72 @@ class LiveClient:
     def _cmd_track_stop(self, _):
         self.track = None
         return {'type': 'track', 'track': {'phase': 'off', 'event': 'stopped'}}
+
+    # ---------- the assistant (vision/assistant.py): answered off the frame loop (main.py) ----------
+    @property
+    def assistant(self):
+        if self._assistant is None:
+            from .assistant import Assistant
+            self._assistant = Assistant()
+        return self._assistant
+
+    def facts(self, context=None, sides=None):
+        """The tutor's real state, as text for the assistant. context: what the page shows and says now;
+        sides: where each side is from the person's seat, as the page words it ({colour: 'on your left'})."""
+        lines = []
+        if context:
+            lines.append(f'The tutor\'s current instruction (shown and said): "{context}"')
+        if sides:
+            lines.append('Where each side is for the person: ' + ', '.join(f'{c} {p}' for c, p in sides.items()) + '.')
+        if self.scan is not None:
+            st = self.scan.status() if callable(getattr(self.scan, 'status', None)) else {}
+            lines.append(f"Stage: scanning the cube's colours ({st.get('sides_done', '?')} of 6 sides scanned so far).")
+        elif self.track is None and self.scan_rgbs is not None:
+            lines.append('Stage: the scan is done; the person is checking the colours on screen before solving.')
+        elif self.track is None:
+            lines.append('Stage: nothing started yet; the person can say scan to begin.')
+        if self.track is not None:
+            t, c = self.track, self.track.face_colors
+            side = lambda m: f"{m} (the {c.get(m[0], m[0])} side)"   # noqa: E731
+            st = t.status()
+            if t.solved:
+                lines.append('Stage: the cube is solved.')
+            elif not t.home_ok:
+                lines.append('Stage: about to start solving; waiting for the cube to be held as in the first scan view.')
+            else:
+                lines.append(f"Stage: solving. Move {st['step']} of {st['total']}.")
+                if t.off:
+                    lines.append(f"There is a mistake to undo first: {', '.join(side(m) for m in st['undo'])}; then the plan carries on.")
+                elif st['move']:
+                    lines.append(f"The move asked for now: {side(st['move'])}.")
+                rest = t.plan[t.step + 1:]
+                lines.append(f"Moves left after this one: {len(rest)}" + (f": {' '.join(side(m) for m in rest[:8])}{' ...' if len(rest) > 8 else ''}." if rest else '.'))
+            lines.append('Move letters and side colours (only if asked about letters): '
+                         + ', '.join(f'{f} = the {c.get(f, "?")} side' for f in 'URFDLB') + '.')
+        if self.stats:
+            s = self.stats
+            secs = s.get('seconds') or round(time.monotonic() - s['start'])
+            lines.append(f"This solve so far: {secs // 60} min {secs % 60} s; plan of {s.get('plan')} moves; "
+                         f"{s.get('correct', 0)} moves done right, {s.get('wrong', 0)} wrong moves, {s.get('undone', 0)} undone, "
+                         f"'I did it' used {s.get('skips', 0)} times, lost the cube {s.get('lost', 0)} times.")
+            if s.get('mistakes') and self.track is not None:
+                lines.append('The mistakes: ' + ' | '.join(_in_colours(m, self.track.face_colors) for m in s['mistakes'][-3:] if m))
+        return '\n'.join(lines)
+
+    def ask(self, command):
+        """{'type': 'ask', 'text': question, 'context': what the page shows} -> {'type': 'answer', ...}."""
+        question = str(command.get('text') or '').strip()[:300]
+        if not question:
+            raise ProtocolError('nothing asked')
+        sides = command.get('sides') if isinstance(command.get('sides'), dict) else None
+        sides = {str(k)[:12]: str(v)[:24] for k, v in list(sides.items())[:6]} if sides else None
+        answer = self.assistant.ask(question, self.facts(str(command.get('context') or '')[:600], sides))
+        return {'type': 'answer', 'question': question, 'text': answer,
+                'model': getattr(self.assistant.model, 'model', None)}
+
+    def report(self, _=None):
+        """{'type': 'report'} once solved -> {'type': 'report', 'text': a few spoken sentences, or None}."""
+        return {'type': 'report', 'text': self.assistant.report(self.facts()) if self.stats else None}
 
     def _cmd_save(self, _):
         if self.last_jpeg is None:

@@ -202,6 +202,28 @@ class PhoneSession:
                 self._times = {}
         return out
 
+    def assistant_request(self, text):
+        """A question ({'type': 'ask', 'text', 'context', 'sides'}) or the end-of-solve report ({'type':
+        'report'}) from the page: the chat to send to the language model (the app sends it, off the frame
+        loop: vision/assistant.py, android_phone TutorAssistant.kt), as JSON {'messages', 'max_tokens',
+        'question'}; 'messages' is null when there is nothing to ask (a report before any solve)."""
+        from .assistant import question_messages, report_messages
+        cmd = json.loads(text)
+        if cmd.get('type') == 'report':
+            if not self.client.stats:
+                return json.dumps({'messages': None})
+            return json.dumps({'messages': report_messages(self.client.facts()), 'max_tokens': 200})
+        question = str(cmd.get('text') or '').strip()[:300]
+        sides = cmd.get('sides') if isinstance(cmd.get('sides'), dict) else None
+        sides = {str(k)[:12]: str(v)[:24] for k, v in list(sides.items())[:6]} if sides else None
+        facts = self.client.facts(str(cmd.get('context') or '')[:600], sides)
+        return json.dumps({'messages': question_messages(question, facts, getattr(self, 'turns', [])),
+                           'max_tokens': 120, 'question': question})
+
+    def assistant_answered(self, question, answer):
+        """Kept for follow-up questions ("and after that?")."""
+        self.turns = (getattr(self, 'turns', []) + [(question, answer)])[-4:]
+
     def command(self, text):
         """A command from the page (scan_start, scan_accept, track_skip...), as JSON text."""
         try:

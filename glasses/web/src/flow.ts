@@ -9,7 +9,7 @@
 
 import type { AppState } from './appState';
 import type { Effects } from './overlay/effects';
-import { describe, holdHint } from './moveText';
+import { POSITION, describe, holdHint } from './moveText';
 import { type Command, Voice } from './voice';
 import type { FrameReply, Message, ServerLink } from './serverLink';
 
@@ -26,6 +26,10 @@ const NET: Record<string, [number, number]> = { U: [1, 0], L: [0, 1], F: [1, 1],
 const PALETTE = ['white', 'yellow', 'red', 'orange', 'green', 'blue'];
 const SWATCH: Record<string, string> = { white: '#f4f4f0', yellow: '#ffd43b', red: '#e03131', orange: '#ff8a1f',
   green: '#2fb35a', blue: '#2a6fdb' };
+
+function forSpeechLine(s: string): string {
+  return s.replace(/\s+/g, ' ').replace(/\s*\((?:→|Esc|S|N|Enter)\)/g, '').trim().slice(0, 500);
+}
 
 /** What the voice says for a card: its label when it is news ("Move 3 of 18", "Correct"), the
  *  title and the text, without what only makes sense on screen. */
@@ -54,7 +58,10 @@ export class Flow {
   private audio: AudioContext | null = null;
   private el: Record<string, HTMLElement> = {};
   /** Says each instruction as it changes; listens for "next", "repeat", "solve"... (voice.ts). */
-  readonly voice = new Voice((cmd) => this.command(cmd));
+  readonly voice = new Voice((cmd) => this.command(cmd), (q) => this.ask(q));
+  /** What the card shows now (sent with a question, so the assistant knows the instruction). */
+  private shown = '';
+  private reported = false;
 
   constructor(private link: ServerLink, private state: AppState, private effects: Effects, root: HTMLElement) {
     root.innerHTML = `
@@ -81,15 +88,21 @@ export class Flow {
         <div class="percent" id="percent"></div>
       </div>
       <div class="turning" id="turning" hidden>✋ Turning… hold still when you're done</div>
-      <div class="stats" id="stats" hidden></div>`;
+      <div class="stats" id="stats" hidden></div>
+      <div class="mic" id="mic"></div>
+      <div class="assistant" id="assistant" hidden><div class="assistant-q" id="assistant-q"></div><div id="assistant-a"></div></div>`;
     for (const id of ['card', 'card-label', 'card-chip', 'card-title', 'card-text', 'card-steady', 'card-buttons',
       'review', 'review-title', 'net', 'palette', 'review-buttons', 'popup', 'popup-move', 'popup-text', 'popup-close',
-      'progress', 'bar-progress', 'bar-cube', 'percent', 'turning', 'stats']) {
+      'progress', 'bar-progress', 'bar-cube', 'percent', 'turning', 'stats', 'assistant', 'assistant-q', 'assistant-a', 'mic']) {
       this.el[id] = root.querySelector('#' + id)!;
     }
     this.el['popup-close'].onclick = () => (this.el.popup.hidden = true);
-    if (window.TutorVoice) this.voice.listen();          // the glasses app: no click needed for the microphone
-    else addEventListener('pointerdown', () => this.voice.listen(), { once: true });
+    // The microphone: on at once if the browser allows it, else after the first click or key press.
+    this.voice.onMic = (m) => this.showMic(m);
+    this.voice.onHeard = (heard, understood) => this.showMic(this.voice.mic, heard, understood);
+    this.showMic('off');
+    this.voice.listen();
+    for (const ev of ['pointerdown', 'keydown'] as const) addEventListener(ev, () => this.voice.listen());
     for (const colour of PALETTE) {
       const b = document.createElement('button');
       b.style.background = SWATCH[colour];
@@ -115,6 +128,20 @@ export class Flow {
   }
 
   onMessage(msg: Message): void {
+    if (msg.type === 'answer') {
+      const text = String(msg.text ?? '');
+      this.showAssistant(String(msg.question ?? ''), text);
+      this.voice.say(text, true, true);
+      return;
+    }
+    if (msg.type === 'report') {
+      if (msg.text) {
+        this.voice.say(String(msg.text), true, true);
+        this.el.stats.insertAdjacentHTML('beforeend', '<div class="stats-report"></div>');
+        (this.el.stats.lastElementChild as HTMLElement).textContent = String(msg.text);
+      }
+      return;
+    }
     if (msg.type === 'scan_result') this.showReview(msg.scan_result as ScanResult, false);
     else if (msg.type === 'track') this.showTrack(msg.track as Track);
     else if (msg.type === 'scan' && (msg.scan as ScanStatus).phase === 'off') this.idle();
@@ -138,6 +165,38 @@ export class Flow {
       [['Start scan  (S)', () => this.startScan(), 'primary']]);
   }
 
+  /** A spoken question: to the assistant (on the server, vision/assistant.py), with what the tutor shows now
+   *  and where each side is from the person's seat; the answer is said and shown (onMessage 'answer'). */
+  private ask(question: string): void {
+    const colours = this.track?.face_colors;
+    const sides = colours ? Object.fromEntries(Object.entries(POSITION).map(([f, p]) => [colours[f] ?? f, p])) : undefined;
+    this.link.send({ type: 'ask', text: question, context: this.shown, sides });
+    this.showAssistant(question, 'Thinking…');
+    this.tone(660, 0, 0.08);
+  }
+
+  /** The microphone indicator: listening or not, and what was last heard (for a few seconds). */
+  private showMic(state: string, heard?: string, understood?: string | null): void {
+    const el = this.el.mic;
+    const base: Record<string, string> = { listening: '🎤 Listening: say “scan”, “next”, “repeat”, or ask a question',
+      'needs-click': '🎤 Click anywhere to turn on the voice', blocked: '🎤 Microphone blocked: allow it in the address bar',
+      unsupported: '🎤 Voice commands need Chrome', off: '🎤 Voice starting…' };
+    el.className = 'mic ' + state;
+    el.textContent = heard ? `🎤 Heard “${heard}”${understood ? ` → ${understood}` : ' (not a command)'}` : (base[state] ?? '');
+    clearTimeout(this.micTimer);
+    if (heard) this.micTimer = window.setTimeout(() => this.showMic(this.voice.mic), 4000);
+  }
+  private micTimer = 0;
+
+  private showAssistant(question: string, answer: string): void {
+    this.el.assistant.hidden = false;
+    this.el['assistant-q'].textContent = `“${question}”`;
+    this.el['assistant-a'].textContent = answer;
+    clearTimeout(this.assistantTimer);
+    this.assistantTimer = window.setTimeout(() => (this.el.assistant.hidden = true), 15000);
+  }
+  private assistantTimer = 0;
+
   /** A spoken command: the same as the button or key for it, where that applies now. */
   private command(cmd: Command): void {
     const p = this.state.phase;
@@ -152,6 +211,7 @@ export class Flow {
 
   private startScan(): void {
     this.voice.listen();
+    this.reported = false;
     this.ensureAudio();
     this.link.send({ type: 'scan_start' });
     this.enterScan();
@@ -285,7 +345,10 @@ export class Flow {
     if (t.event === 'wrong') { this.stats.mistakes++; this.stats.moves++; this.beepLow(); }
 
     if (t.phase === 'solved') {
-      if (this.state.phase !== 'solved') { this.effects.celebrate(now, innerWidth, innerHeight); this.beep(3); this.showStats(); }
+      if (this.state.phase !== 'solved') {
+        this.effects.celebrate(now, innerWidth, innerHeight); this.beep(3); this.showStats();
+        if (!this.reported) { this.reported = true; this.link.send({ type: 'report' }); }   // the assistant's few words
+      }
       this.state.set('solved');
       this.state.error = false;
       this.guide = null;
@@ -369,6 +432,7 @@ export class Flow {
                tone = ''): void {
     // "Hold still…" comes and goes as the cube moves: not said. News (correct, wrong, captured, solved) cuts in.
     if (!/^Hold still/.test(title)) this.voice.say(spoken(label, title, text), false, /^(✓|Not that|Solved|Lost|New plan)/.test(label));
+    this.shown = forSpeechLine(`${label}. ${title}. ${text}`);
     this.el.card.hidden = false;
     this.el.card.className = 'card ' + tone;
     this.el['card-label'].textContent = label;
