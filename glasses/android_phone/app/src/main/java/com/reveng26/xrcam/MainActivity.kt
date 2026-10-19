@@ -1,0 +1,190 @@
+package com.reveng26.xrcam
+
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbManager
+import android.os.Build
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.text.method.ScrollingMovementMethod
+import androidx.appcompat.app.AppCompatActivity
+import com.reveng26.xrcam.databinding.ActivityMainBinding
+
+class MainActivity : AppCompatActivity(), GlassesConnection.Listener {
+
+    private lateinit var binding: ActivityMainBinding
+    private lateinit var glasses: GlassesConnection
+    private val handler = Handler(Looper.getMainLooper())
+
+    // Listen for USB attach/detach to auto-detect glasses
+    private val usbReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            when (intent.action) {
+                UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
+                    onLog("USB device attached — scanning...")
+                    handler.postDelayed({ glasses.scanForGlasses() }, 500)
+                }
+                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                    onLog("USB device detached")
+                    glasses.disconnect()
+                    onDisconnected()
+                }
+            }
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        binding.logText.movementMethod = ScrollingMovementMethod()
+        // Android 14 gives a USB camera (the glasses' camera) only to apps that hold the camera
+        // permission; without it the USB prompt is refused straight away ("USB permission denied").
+        // the camera, and the microphone for spoken commands ("next", "repeat": TutorVoice)
+        val missing = arrayOf(android.Manifest.permission.CAMERA, android.Manifest.permission.RECORD_AUDIO)
+            .filter { checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty()) {
+            requestPermissions(missing.toTypedArray(), 1)
+        }
+        if (intent?.getBooleanExtra("selftest", false) == true) Thread { SelfTest.run(this) }.start()   // see SelfTest.kt
+
+        glasses = GlassesConnection(this)
+        glasses.listener = this
+
+        binding.serverAddress.visibility = android.view.View.GONE   // no laptop to point at
+
+        binding.btnStartCamera.setOnClickListener {
+            launchCamera()
+        }
+
+        // Register for USB events
+        val filter = IntentFilter().apply {
+            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(usbReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(usbReceiver, filter)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("autostart", false) && binding.btnStartCamera.isEnabled) {
+            intent.removeExtra("autostart")
+            launchCamera()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        glasses.start()
+
+        // If launched by USB intent, handle it
+        if (intent?.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
+            handler.postDelayed({ glasses.scanForGlasses() }, 300)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Don't disconnect — keep connection alive while camera activity is open
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        glasses.stop()
+        try { unregisterReceiver(usbReceiver) } catch (_: Exception) {}
+    }
+
+    /** "172.20.10.14:5273", whatever was typed (with or without https:// or a path). */
+    /** The tutor runs in this app: the page is served from the phone itself. */
+    private fun serverAddress(): String = "127.0.0.1:${TutorEngine.PORT}"
+
+    private var lastLaunch = 0L
+
+    private fun launchCamera() {
+        // Once at a time: the glasses can report "connected" twice in a row, and two switch-ons
+        // at once left the camera off.
+        val now = System.currentTimeMillis()
+        if (now - lastLaunch < 15000) return
+        lastLaunch = now
+        onLog("Enabling Eye camera...")
+        glasses.enableCamera(GlassesConnection.CameraType.GREYSCALE)
+    }
+
+    // --- GlassesConnection.Listener ---
+
+    override fun onConnected(deviceName: String) {
+        handler.post {
+            binding.statusText.text = "Connected: $deviceName"
+            binding.statusText.setTextColor(0xFF00E676.toInt())
+            binding.btnStartCamera.isEnabled = true
+            // "autostart": the tutor screen asks for this when the glasses' camera went away (it switches
+            // the camera on again). Also handy from a computer, where taps don't reach the app while
+            // the glasses are in use:
+            // adb shell am start -n com.cubetutor.phonefast/com.reveng26.xrcam.MainActivity --ez autostart true
+            if (intent?.getBooleanExtra("autostart", false) == true) {
+                intent.removeExtra("autostart")
+                launchCamera()
+            }
+        }
+    }
+
+    override fun onDisconnected() {
+        handler.post {
+            binding.statusText.text = "Disconnected"
+            binding.statusText.setTextColor(0xFFFF5252.toInt())
+            binding.btnStartCamera.isEnabled = false
+        }
+    }
+
+    override fun onError(message: String) {
+        handler.post {
+            appendLog("ERROR: $message")
+        }
+    }
+
+    override fun onLog(message: String) {
+        handler.post {
+            appendLog(message)
+        }
+    }
+
+    override fun onCameraEnabled(cameraType: GlassesConnection.CameraType) {
+        handler.post {
+            appendLog("Camera enable command sent!")
+            appendLog("Starting camera view...")
+
+            val intent = Intent(this, CameraActivity::class.java).apply {
+                putExtra(CameraActivity.EXTRA_CAMERA_TYPE, cameraType.name)
+                putExtra(CameraActivity.EXTRA_SERVER, serverAddress())
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            // On the phone's own screen: XREAL's app otherwise opens it on its virtual screen inside
+            // the glasses, and the phone shows only XREAL's trackpad (no tutor, no buttons).
+            startActivity(intent, CameraActivity.onPhoneScreen())
+        }
+    }
+
+    private fun appendLog(msg: String) {
+        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+            .format(java.util.Date())
+        binding.logText.append("[$time] $msg\n")
+        android.util.Log.i("MainActivity", msg)
+
+        // Auto-scroll to bottom
+        val scrollAmount = binding.logText.layout?.let {
+            it.getLineTop(binding.logText.lineCount) - binding.logText.height
+        } ?: 0
+        if (scrollAmount > 0) {
+            binding.logText.scrollTo(0, scrollAmount)
+        }
+    }
+}

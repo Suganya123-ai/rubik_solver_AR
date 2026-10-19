@@ -10,7 +10,8 @@ WORK = os.path.join(ROOT, 'data', 'autolearn')
 
 # the app folders on this laptop: every demo's saved frames feed the loop (read only)
 DEFAULT_APPS = ['rubik_solver_AR_webcam', 'rubik_solver_AR_anyside', 'rubik_solver_AR_glasses',
-                'rubik_solver_AR_pyraminx', os.path.basename(ROOT)]
+                'rubik_solver_AR_pyraminx', 'rubik_solver_AR_autolearn', 'rubik_solver_AR_laptop_voice',
+                'rubik_solver_AR_assistant', os.path.basename(ROOT)]
 # the earlier training pictures (images/<split> + labels/<split>), from the folders they were made in
 _PYRA = os.path.join(HOME, 'rubik_solver_AR_pyraminx', 'bench', 'data')
 _CUBE = os.path.join(HOME, 'rubik_solver_AR_anyside', 'bench', 'data')
@@ -46,7 +47,8 @@ def excluded():
 def apps():
     env = os.environ.get('AUTOLEARN_APPS')
     names = env.split(':') if env else DEFAULT_APPS
-    return [n if os.path.isabs(n) else os.path.join(HOME, n) for n in names if os.path.isdir(n if os.path.isabs(n) else os.path.join(HOME, n))]
+    paths = [n if os.path.isabs(n) else os.path.join(HOME, n) for n in names]
+    return list(dict.fromkeys(p for p in paths if os.path.isdir(p)))   # (each folder once)
 
 
 def replay(puzzle):

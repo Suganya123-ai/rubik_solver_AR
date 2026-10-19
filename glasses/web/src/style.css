@@ -1,0 +1,176 @@
+:root { --cyan: #5ee6ff; --green: #3dff9a; --red: #ff4d5e; --amber: #ffb547; --ink: #e8fbff;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #000; color: var(--ink); overflow: hidden;
+  font-family: Inter, system-ui, -apple-system, sans-serif; }
+#stage { position: fixed; inset: 0; }
+/* Mirrored, filling the screen; overlays use the same mapping (src/view.ts). */
+#video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+#overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+#hud { position: absolute; inset: 0; pointer-events: none; }
+
+.hud-stats { position: absolute; left: 16px; top: 16px; font: 11px var(--mono); color: var(--cyan);
+  background: rgba(4, 12, 18, .45); border: 1px solid rgba(94, 230, 255, .35); border-radius: 8px;
+  padding: 8px 10px; backdrop-filter: blur(6px); min-width: 180px; }
+.hud-stats div { display: flex; justify-content: space-between; gap: 16px; line-height: 1.6; }
+.hud-stats span { opacity: .65; letter-spacing: .08em; }
+.hud-stats b { font-weight: 600; color: var(--ink); }
+
+.hud-target { position: absolute; left: 50%; top: 50%; width: min(38vh, 40vw); aspect-ratio: 1;
+  transform: translate(-50%, -50%) scale(.96); border: 1.5px dashed rgba(94, 230, 255, .7); border-radius: 18px;
+  opacity: 0; transition: opacity .3s, transform .3s; box-shadow: 0 0 24px rgba(94, 230, 255, .15) inset; }
+.hud-target.on { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.hud-hint { position: absolute; left: 50%; bottom: 8vh; transform: translateX(-50%); padding: 10px 18px;
+  border-radius: 999px; background: rgba(4, 12, 18, .6); border: 1px solid rgba(94, 230, 255, .5);
+  font-size: 15px; opacity: 0; transition: opacity .3s; backdrop-filter: blur(6px); white-space: nowrap; }
+.hud-hint.on { opacity: 1; }
+.hud-message { position: absolute; left: 50%; top: 16px; transform: translateX(-50%); padding: 8px 16px;
+  border-radius: 999px; background: rgba(4, 12, 18, .6); border: 1px solid rgba(255, 255, 255, .3);
+  font-size: 14px; opacity: 0; transition: opacity .3s; }
+.hud-message.on { opacity: 1; }
+@media (max-width: 640px) { .hud-hint { white-space: normal; width: calc(100% - 32px); text-align: center; } }
+
+/* ---------- tutor UI (flow.ts) ---------- */
+#ui { position: absolute; inset: 0; pointer-events: none; }
+#ui button { pointer-events: auto; font: 600 13px Inter, system-ui, sans-serif; color: var(--ink); cursor: pointer;
+  background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .25); border-radius: 999px; padding: 7px 14px; }
+#ui button:hover { background: rgba(255, 255, 255, .16); }
+#ui button.primary { background: rgba(61, 255, 154, .18); border-color: var(--green); color: #eafff3; }
+.glass { background: rgba(6, 14, 20, .62); border: 1px solid rgba(94, 230, 255, .4); backdrop-filter: blur(10px);
+  box-shadow: 0 0 30px rgba(94, 230, 255, .12); border-radius: 16px; }
+
+.card { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); width: min(680px, calc(100% - 32px));
+  padding: 12px 18px 14px; pointer-events: auto; background: rgba(6, 14, 20, .66); border: 1px solid rgba(94, 230, 255, .45);
+  backdrop-filter: blur(10px); border-radius: 16px; box-shadow: 0 0 30px rgba(94, 230, 255, .12); transition: border-color .2s, box-shadow .2s; }
+.card[hidden] { display: none; }
+.card-label { font: 11px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--cyan); }
+.card-main { display: flex; align-items: center; gap: 10px; font-size: 24px; font-weight: 800; margin: 4px 0 2px; }
+.card-text { font-size: 14px; opacity: .85; min-height: 1.2em; }
+.chip { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 26px; font-size: 18px; }
+.chip i { display: inline-block; width: 22px; height: 22px; border-radius: 6px; border: 2px solid rgba(255, 255, 255, .8); }
+.chip[hidden] { display: none; }
+.card-buttons { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.steady { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .12); margin-top: 8px; overflow: hidden; }
+.steady > div { height: 100%; width: 0; background: var(--cyan); transition: width .15s; }
+.card.good { border-color: var(--green); box-shadow: 0 0 34px rgba(61, 255, 154, .3); }
+.card.good .card-label { color: var(--green); }
+.card.warn { border-color: var(--amber); box-shadow: 0 0 34px rgba(255, 181, 71, .3); }
+.card.warn .card-label { color: var(--amber); }
+.card.bad { border-color: var(--red); box-shadow: 0 0 40px rgba(255, 77, 94, .35); }
+.card.bad .card-label { color: var(--red); }
+
+.review { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(460px, calc(100% - 32px));
+  padding: 16px; pointer-events: auto; background: rgba(6, 14, 20, .78); border: 1px solid rgba(94, 230, 255, .45);
+  backdrop-filter: blur(12px); border-radius: 18px; }
+.review[hidden] { display: none; }
+.review-title { font-size: 14px; margin-bottom: 10px; }
+.net { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.net-face { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; background: #000; padding: 3px; border-radius: 6px; }
+.net-face button { aspect-ratio: 1; padding: 0 !important; border-radius: 3px !important; border: 0 !important; }
+.net-face button.doubtful { outline: 2px solid var(--amber); outline-offset: -2px; animation: pulse 1s infinite alternate; }
+.net-face button.selected { outline: 3px solid #fff; outline-offset: -3px; }
+@keyframes pulse { from { box-shadow: 0 0 0 rgba(255, 181, 71, 0); } to { box-shadow: 0 0 10px rgba(255, 181, 71, .9); } }
+.palette { display: flex; gap: 8px; justify-content: center; margin-top: 10px; }
+.palette[hidden] { display: none; }
+.palette button { width: 34px; height: 34px; padding: 0 !important; border-radius: 8px !important; }
+
+.popup { position: absolute; left: 50%; top: 90px; transform: translateX(-50%); width: min(360px, calc(100% - 32px));
+  pointer-events: auto; background: rgba(6, 14, 20, .78); border: 1px solid var(--red); border-radius: 12px;
+  box-shadow: 0 0 34px rgba(255, 77, 94, .35); backdrop-filter: blur(10px); overflow: hidden; }
+.popup[hidden] { display: none; }
+.popup-head { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px;
+  font: 600 12px var(--mono); color: var(--red); background: rgba(255, 77, 94, .12); }
+.popup-head button { padding: 2px 8px !important; }
+.popup-body { display: flex; gap: 12px; align-items: center; padding: 10px 12px; font-size: 14px; }
+.popup-body b { display: flex; align-items: center; gap: 8px; }
+.popup-body b i { display: inline-block; width: 18px; height: 18px; border-radius: 4px; border: 2px solid #fff; }
+.popup-icon { font-size: 34px; color: #ff6a3d; text-shadow: 0 0 12px rgba(255, 106, 61, .8); }
+
+.progress { position: absolute; left: 16px; top: 120px; pointer-events: none; font: 10px var(--mono); color: var(--cyan); }
+.progress[hidden] { display: none; }
+.bars { display: flex; gap: 8px; height: 38vh; }
+.bar { width: 10px; height: 100%; background: rgba(94, 230, 255, .12); border: 1px solid rgba(94, 230, 255, .4);
+  border-radius: 3px; display: flex; align-items: flex-end; overflow: hidden; }
+.bar > div { width: 100%; height: 0; background: linear-gradient(#5ee6ff, #3dd6c0); box-shadow: 0 0 10px #5ee6ff; transition: height .4s; }
+.bar-labels { display: flex; gap: 8px; margin-top: 4px; opacity: .8; } .bar-labels span { width: 34px; }
+.percent { font-size: 18px; color: var(--ink); margin-top: 6px; }
+
+.turning { position: absolute; right: 16px; top: 16px; padding: 7px 14px; border-radius: 999px; font-size: 13px;
+  background: rgba(6, 14, 20, .7); border: 1px solid rgba(255, 255, 255, .5); }
+.turning[hidden] { display: none; }
+.stats { position: absolute; right: 24px; top: 50%; transform: translateY(-50%); width: 220px; padding: 14px 16px;
+  background: rgba(6, 14, 20, .72); border: 1px solid var(--green); border-radius: 14px; font: 12px var(--mono);
+  box-shadow: 0 0 34px rgba(61, 255, 154, .25); }
+.stats[hidden] { display: none; }
+.stats-title { font: 800 20px Inter, sans-serif; color: var(--green); margin-bottom: 8px; }
+.stats-row { display: flex; justify-content: space-between; line-height: 1.9; } .stats-row span { opacity: .7; }
+
+/* ghost cube */
+#ghost { position: absolute; left: 0; top: 0; width: 260px; height: 260px; border-radius: 18px; pointer-events: auto;
+  background: radial-gradient(ellipse at 50% 45%, rgba(94, 230, 255, .14), rgba(6, 14, 20, .25) 70%);
+  border: 1px solid rgba(94, 230, 255, .3); transition: border-color .3s, box-shadow .3s; }
+#ghost[hidden] { display: none; }
+#ghost canvas { width: 100%; height: 100%; display: block; /* drawn from the user's side (main.ts), not mirrored */ }
+.ghost-warning { position: absolute; left: -14px; top: 22%; width: 46px; height: 56%; display: none; align-items: center;
+  justify-content: center; font-size: 26px; color: var(--amber); background: rgba(255, 181, 71, .18);
+  border: 1px solid var(--amber); border-radius: 8px; box-shadow: 0 0 20px rgba(255, 181, 71, .5); }
+#ghost.warn { border-color: var(--amber); box-shadow: 0 0 30px rgba(255, 181, 71, .3); }
+#ghost.warn .ghost-warning { display: flex; }
+.hud-hint { bottom: 210px; }
+.hud-stats { top: 16px; }
+
+.ghost-label { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font: 10px var(--mono);
+  color: rgba(232, 251, 255, .7); letter-spacing: .08em; pointer-events: none; }
+
+/* several colour swatches in the card chip (side 1's centres during scan 2) */
+.chip i + i { margin-left: 4px; }
+
+/* ---------- glasses (branch xreal-glasses) ---------- */
+/* The camera looks the wearer's way: not mirrored. */
+body.glasses #video { transform: none; }
+/* Floating display only: no camera picture and a black ground, which is invisible on see-through glasses. */
+body.hud-only #video { visibility: hidden; }
+body.hud-only .hud-target, body.hud-only .hud-stats { display: none; }
+body.hud-only #ghost { background: none; border-color: transparent; }
+#controls { position: absolute; right: 16px; top: 16px; display: flex; gap: 8px; align-items: center;
+  font: 12px var(--mono); color: var(--ink); background: rgba(6, 14, 20, .6); border: 1px solid rgba(94, 230, 255, .35);
+  border-radius: 10px; padding: 6px 10px; }
+#controls[hidden] { display: none; }
+#controls select, #controls button { font: inherit; color: var(--ink); background: rgba(255, 255, 255, .08);
+  border: 1px solid rgba(255, 255, 255, .25); border-radius: 8px; padding: 5px 8px; max-width: 46vw; }
+body.glasses .turning { top: 64px; }  /* below the camera chooser */
+@media (max-width: 900px) {
+  /* Phone-sized screen (the Beam Pro held upright): the chooser spans the top, the readouts make room for it. */
+  #controls { left: 8px; right: 8px; top: 8px; justify-content: space-between; }
+  #controls select { max-width: 52vw; }
+  body.glasses .hud-stats { display: none; }
+  body.glasses .progress { top: 70px; }
+  body.glasses .turning { top: 60px; }
+  body.glasses .popup { top: 64px; }
+  .card { bottom: 12px; padding: 10px 14px 12px; }
+  .card-main { font-size: 20px; }
+}
+
+/* Remote camera: the picture the server receives from the bridge app, in place of the video. */
+#remote-picture { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#remote-picture[hidden] { display: none; }
+body.hud-only #remote-picture { visibility: hidden; }
+body.remote #video { display: none; }
+
+/* The glasses' own screen: looked at, never touched -- no buttons; the phone has them. */
+body.display-only .card-buttons, body.display-only #controls, body.display-only #review-buttons,
+body.display-only .palette, body.display-only #popup-close { display: none !important; }
+body.display-only .card { bottom: 6vh; }
+body.display-only .card-main { font-size: 34px; }
+body.display-only .card-text { font-size: 20px; }
+body.display-only .card-label { font-size: 14px; }
+
+/* On the glasses the ghost cube is small and fixed top-right: a lighter frame and label. */
+body.glasses .ghost-label { font-size: 8px; bottom: 2px; }
+body.glasses .ghost-warning { left: -10px; width: 30px; font-size: 18px; }
+body.glasses .progress { top: 70px; }
+
+/* Remote camera = the Beam Pro, a busy device: no blur behind the panels (it is costly to draw). */
+body.remote .card, body.remote .review, body.remote .popup, body.remote .hud-stats, body.remote .hud-hint,
+body.remote #controls { backdrop-filter: none; -webkit-backdrop-filter: none; }
+body.remote .card { background: rgba(6, 14, 20, .86); }

@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Unity (xreal_ar/UnityProject, once it's a full project with these generated)
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+[Mm]emoryCaptures/
+.vs/
+*.csproj
+*.sln
+*.unityproj
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# Secrets -- never commit these
+*.ulf
+*.keystore
+
+# Benchmarks: large local-only folders (see bench/README.md)
+bench/.venv/
+bench/third_party/
+bench/data/
+bench/runs/
+bench/reports_out/
+bench/*.pt
+
+# Frames saved from the live view (Day 3 training data)
+data/captures/
+
+# Training logs
+bench/*.log
+
+# Solving sessions and scan recordings (camera frames; local diagnostics only)
+data/sessions/
+data/scans/
+
+# Self-signed certificate for serving the glasses app over https (made by run_glasses.sh)
+.certs/
+
+# a link to the background photos (not in git)
+bench/data
+
+# shared with the phone folder (a link)
+web/node_modules

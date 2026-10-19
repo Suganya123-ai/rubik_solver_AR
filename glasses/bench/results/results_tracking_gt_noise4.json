@@ -1,0 +1,61 @@
+{
+ "n": 30,
+ "results": {
+  "normal|gt": {
+   "correct": 96.66666666666667,
+   "wrong": 0.0,
+   "unsure": 3.3333333333333335,
+   "lost": 0.0,
+   "no_kpts": 0.0,
+   "ms_median": 62.01754200446885,
+   "by_event": {
+    "wrong single move": 88.88888888888889,
+    "did expected move": 100.0,
+    "two quick moves": 100.0,
+    "no move yet": 100.0
+   }
+  },
+  "normal|noise4": {
+   "correct": 100.0,
+   "wrong": 0.0,
+   "unsure": 0.0,
+   "lost": 0.0,
+   "no_kpts": 0.0,
+   "ms_median": 61.994041498110164,
+   "by_event": {
+    "wrong single move": 100.0,
+    "did expected move": 100.0,
+    "two quick moves": 100.0,
+    "no move yet": 100.0
+   }
+  },
+  "hard|gt": {
+   "correct": 93.33333333333333,
+   "wrong": 0.0,
+   "unsure": 0.0,
+   "lost": 6.666666666666667,
+   "no_kpts": 0.0,
+   "ms_median": 62.406438002653886,
+   "by_event": {
+    "wrong single move": 100.0,
+    "did expected move": 92.85714285714286,
+    "two quick moves": 80.0,
+    "no move yet": 100.0
+   }
+  },
+  "hard|noise4": {
+   "correct": 93.33333333333333,
+   "wrong": 0.0,
+   "unsure": 0.0,
+   "lost": 6.666666666666667,
+   "no_kpts": 0.0,
+   "ms_median": 62.181562003388535,
+   "by_event": {
+    "wrong single move": 100.0,
+    "did expected move": 92.85714285714286,
+    "two quick moves": 80.0,
+    "no move yet": 100.0
+   }
+  }
+ }
+}

@@ -1,0 +1,11 @@
+# Versions the app was tested with (Python 3.13, macOS / Apple M1 Pro).
+fastapi==0.142.4
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
+pillow==12.3.0
+numpy==2.5.3
+kociemba==1.2.1
+opencv-python==5.0.0.93
+ultralytics==8.4.175
+torch==2.14.1
+mediapipe==1.1.0   # hand tracking (models/hand_landmarker.task)

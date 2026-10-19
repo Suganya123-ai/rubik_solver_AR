@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What I Tested</title>
+<style>
+:root {
+  --bg: #f9f9f7; --surface: #ffffff; --ink: #1b1f27; --ink2: #4b5260; --muted: #7a818c;
+  --line: #e3e5e9; --accent: #2a6fdb; --accent-bg: #eef4fe; --good: #15803d; --good-bg: #eaf7ee;
+  --warn: #b45309; --warn-bg: #fff6e8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111214; --surface: #1a1b1e; --ink: #f1f2f4; --ink2: #c4c8cf; --muted: #8d939c;
+    --line: #2c2e33; --accent: #6ea2f5; --accent-bg: #1a2638; --good: #4ade80; --good-bg: #13261a;
+    --warn: #fbbf24; --warn-bg: #2a2111;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+main { max-width: 760px; margin: 0 auto; padding: 40px 16px 80px; }
+.kicker { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); font-weight: 800; }
+h1 { font-size: 34px; line-height: 1.15; margin: 6px 0 12px; letter-spacing: -.02em; }
+h2 { font-size: 22px; margin: 44px 0 10px; letter-spacing: -.01em; }
+h3 { font-size: 17px; margin: 0 0 6px; }
+p { margin: 8px 0; }
+.lead { font-size: 18px; color: var(--ink2); }
+.callout { background: var(--accent-bg); border-left: 4px solid var(--accent); border-radius: 10px; padding: 14px 18px; margin: 18px 0; }
+.callout.warn { background: var(--warn-bg); border-left-color: var(--warn); }
+.links { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 0; }
+.links a { font-size: 14px; text-decoration: none; color: var(--accent); background: var(--surface); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; }
+.links a:hover { border-color: var(--accent); }
+ul { padding-left: 22px; margin: 8px 0; } li { margin: 6px 0; }
+.test { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; margin: 14px 0; }
+.test .num { display: inline-flex; width: 28px; height: 28px; border-radius: 50%; background: var(--ink); color: var(--bg); font-weight: 800; font-size: 14px; align-items: center; justify-content: center; margin-right: 10px; vertical-align: 2px; }
+.row { display: grid; grid-template-columns: 70px 1fr; gap: 4px 12px; margin-top: 10px; }
+.row b { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: .06em; padding-top: 2px; }
+.result { background: var(--good-bg); border-radius: 8px; padding: 8px 12px; margin-top: 10px; }
+.result b { color: var(--good); }
+table { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin: 12px 0; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); font-size: 15px; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+tr:last-child td { border-bottom: none; }
+img { width: 100%; border-radius: 12px; border: 1px solid var(--line); margin-top: 10px; }
+.note { font-size: 14px; color: var(--muted); }
+@media (max-width: 560px) { h1 { font-size: 28px; } .row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+<div class="kicker">Rubik's Cube Solver · Team update</div>
+<h1>What I tested, how, and why</h1>
+<p class="lead">I want a Rubik's Cube app where the camera watches the cube, works out the solution, checks every move the user makes, and, if they make a mistake, says so and gives a corrected plan. <b>Phase 1</b> runs on a laptop with its webcam; once that works, <b>Phase 2</b> moves it to our XREAL glasses with the Eye camera.</p>
+<div class="callout">Before building anything, I tested the open-source options for each part of that, <b>using the same tests for all of them</b>, so we choose based on numbers, not guesses.</div>
+<div class="links">
+  <a href="Team_Summary.pdf">Team summary (4-page PDF)</a>
+  <a href="Benchmark_Report.pdf">Full benchmark report (PDF)</a>
+  <a href="benchmark/index.html">Interactive charts</a>
+  <a href="Implementation_Plan.pdf">Implementation plan (PDF)</a>
+  <a href="Seven_Day_Plan.pdf">7-day plan (PDF)</a>
+  <a href="test_images/index.html">Test images</a>
+  <a href="yolo_runs/index.html">YOLO runs</a>
+</div>
+
+<h2>How I tested</h2>
+<ul>
+  <li><b>Fake but realistic camera images.</b> I wrote a program that draws a 3D Rubik's Cube in any scrambled state, with messy backgrounds, bad lighting, glare, fingers in the way, blur and camera noise. Because the program drew the cube, it knows the correct answer for every image, so every test is scored automatically and fairly. <a href="test_images/index.html" style="color:var(--accent)">See the test images →</a></li>
+  <li><b>Two difficulty levels:</b> "normal light" (a decent room) and "hard lighting" (coloured light, glare, more fingers, blur).</li>
+  <li><b>A few real photos:</b> 6 photos of a real cube from another developer's project (dwalton76) as a reality check.</li>
+  <li><b>Every project ran its own code.</b> One project is written in C#, which couldn't run on my machine, so I translated its logic to Python step by step to test it.</li>
+</ul>
+
+<h2>The 6 tests</h2>
+
+<div class="test"><h3><span class="num">1</span>Solver: how many moves to solve the cube?</h3>
+<div class="row"><b>Why</b><span>Fewer moves is easier for the user, and it has to be fast so it can re-plan instantly after a mistake.</span>
+<b>How</b><span>200 scrambled cubes through 5 solvers, checking that every solution really solves the cube.</span></div>
+<div class="result"><b>Result:</b> kociemba solves in about <b>21 moves</b> in ~11 ms. Our current solver needs ~110.</div></div>
+
+<div class="test"><h3><span class="num">2</span>Finding the cube: can it find the stickers when someone holds it?</h3>
+<div class="row"><b>Why</b><span>The app must find the cube on its own, with no lining it up with a box on screen.</span>
+<b>How</b><span>600 images with the cube held at different angles and positions, across 6 detectors.</span></div>
+<div class="result"><b>Result:</b> old-style detectors only work when the cube is lined up; held freely, the best got <b>38.5%</b>. So I trained an AI model (<b>YOLO</b>) to find the cube's corners: <b>100%</b> found, in 15 ms.</div></div>
+
+<div class="test"><h3><span class="num">3</span>Colours: does it read every sticker correctly?</h3>
+<div class="row"><b>Why</b><span>One wrong sticker means a wrong cube and a wrong solution.</span>
+<b>How</b><span>300 complete cubes (all 6 sides each) under both lighting levels, across 7 colour methods.</span></div>
+<div class="result"><b>Result:</b> our current method plus a backup method (dwalton76's colour resolver) got <b>98%</b> of cubes completely right in normal light, 89% in hard lighting.</div></div>
+
+<div class="test"><h3><span class="num">4</span>Camera view: how much of the cube must the camera see?</h3>
+<div class="row"><b>Why</b><span>If a turn happens on a side the camera can't see, the app can't know it happened.</span>
+<b>How</b><span>For 300 cubes, I checked whether every possible move looks different from the camera's point of view.</span></div>
+<div class="result"><b>Result:</b> front only fails (back turns are invisible). Seeing <b>3 sides at once</b> (top, front, right) catches <b>100%</b> of moves, so the user holds the cube corner-on to the camera.</div></div>
+
+<div class="test"><h3><span class="num">5</span>Move tracking: does it catch the user's mistakes?</h3>
+<div class="row"><b>Why</b><span>This is the main feature, and no existing project does it, so I built it and tested it myself.</span>
+<b>How</b><span>3,600 before-and-after tests: the user did the right move, a wrong move, two quick moves, or nothing, and the app had to say which.</span></div>
+<div class="result"><b>Result:</b> with the AI model finding the cube, <b>98.7% correct</b> (90% in hard lighting) and it <b>never named a wrong move</b>. When unsure, it waits or asks for a rescan.</div></div>
+
+<div class="test"><h3><span class="num">6</span>The C# project and our hardware</h3>
+<div class="row"><b>Why</b><span>Our glasses app will be in C#, so I checked whether an existing C# AR solver (ephynes) is better.</span></div>
+<div class="result"><b>Result:</b> it isn't. It's fast, but it doesn't check moves at all, its colours are weak (52% of cubes right), and its grid often comes out rotated. We may reuse parts of its code.</div>
+<p style="margin-top:12px"><b>Hardware:</b> our XREAL One Pro glasses have the <b>XREAL Eye</b> camera add-on, so in Phase 2 the app will see exactly what the wearer sees, and the Beam Pro (the Android unit the glasses plug into) will run it.</p></div>
+
+<h2>The conclusion</h2>
+<p>No existing project does the whole job. We'll combine the best piece from each test:</p>
+<table>
+  <thead><tr><th>Part</th><th>What we use</th></tr></thead>
+  <tbody>
+    <tr><td>Solving</td><td>kociemba</td></tr>
+    <tr><td>Finding the cube</td><td>My trained AI model (YOLO)</td></tr>
+    <tr><td>Colours</td><td>Our method + the backup method</td></tr>
+    <tr><td>Checking moves</td><td>My own move tracker</td></tr>
+  </tbody>
+</table>
+
+<h2>Be upfront about</h2>
+<div class="callout warn">
+<ul style="margin:0">
+  <li><b>Most images were computer-made</b>, so real results will be somewhat lower. The AI model must be retrained on a few hundred real photos of our cubes; that's the next big step.</li>
+  <li><b>Licences:</b> two of the tools (kociemba and YOLO) have licences (GPL and AGPL) that need a decision before we ever sell the app.</li>
+  <li><b>Rollout:</b> Phase 1 runs on a laptop with its webcam. Phase 2, once Phase 1 works, moves it to our XREAL glasses with the Eye camera.</li>
+</ul></div>
+
+<h2>The real photos I used</h2>
+<p>From dwalton76's <a href="https://github.com/dwalton76/rubiks-cube-tracker/tree/master/test-data/3x3x3-random-01" style="color:var(--accent)">rubiks-cube-tracker test data</a>: one real cube, photographed side by side by his Lego robot.</p>
+<img src="dwalton76_real_photos.jpg" alt="The six real cube photos from dwalton76's rubiks-cube-tracker test data, one per side of the cube">
+<p class="note">Only 6 photos, all straight-on with no hands, which is why the computer-made images carry most of the testing.</p>
+</main>
+</body>
+</html>

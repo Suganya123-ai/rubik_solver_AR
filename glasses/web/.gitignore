@@ -1,0 +1,5 @@
+node_modules/
+dist/
+# copied by scripts/copy-assets.mjs on npm install
+public/mediapipe/
+public/models/

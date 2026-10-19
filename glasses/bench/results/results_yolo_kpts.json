@@ -1,0 +1,33 @@
+{
+ "n": 300,
+ "results": {
+  "mps|normal": {
+   "found_pct": 100.0,
+   "err_mean_pct": 5.4452960133552555,
+   "err_median_pct": 5.244196891784668,
+   "err_p95_pct": 7.820996856689454,
+   "ms_median": 15.090500004589558
+  },
+  "mps|hard": {
+   "found_pct": 100.0,
+   "err_mean_pct": 5.281055107116699,
+   "err_median_pct": 5.137446641921997,
+   "err_p95_pct": 7.54133107662201,
+   "ms_median": 15.82908300042618
+  },
+  "cpu|normal": {
+   "found_pct": 100.0,
+   "err_mean_pct": 5.4452954117457075,
+   "err_median_pct": 5.244196891784668,
+   "err_p95_pct": 7.82101149559021,
+   "ms_median": 39.61156249715714
+  },
+  "cpu|hard": {
+   "found_pct": 100.0,
+   "err_mean_pct": 5.281053487459818,
+   "err_median_pct": 5.137454509735107,
+   "err_p95_pct": 7.5413120031356815,
+   "ms_median": 38.70775000541471
+  }
+ }
+}

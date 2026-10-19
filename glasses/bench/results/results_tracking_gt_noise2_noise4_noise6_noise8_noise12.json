@@ -1,0 +1,173 @@
+{
+ "n": 300,
+ "results": {
+  "normal|gt": {
+   "correct": 99.33333333333333,
+   "wrong": 0.0,
+   "unsure": 0.3333333333333333,
+   "lost": 0.3333333333333333,
+   "no_kpts": 0.0,
+   "ms_median": 62.13908350764541,
+   "by_event": {
+    "wrong single move": 98.86363636363636,
+    "did expected move": 99.03846153846153,
+    "two quick moves": 100.0,
+    "no move yet": 100.0
+   }
+  },
+  "normal|noise2": {
+   "correct": 100.0,
+   "wrong": 0.0,
+   "unsure": 0.0,
+   "lost": 0.0,
+   "no_kpts": 0.0,
+   "ms_median": 62.72766699839849,
+   "by_event": {
+    "wrong single move": 100.0,
+    "did expected move": 100.0,
+    "two quick moves": 100.0,
+    "no move yet": 100.0
+   }
+  },
+  "normal|noise4": {
+   "correct": 99.66666666666667,
+   "wrong": 0.0,
+   "unsure": 0.0,
+   "lost": 0.3333333333333333,
+   "no_kpts": 0.0,
+   "ms_median": 62.36100049864035,
+   "by_event": {
+    "wrong single move": 100.0,
+    "did expected move": 100.0,
+    "two quick moves": 100.0,
+    "no move yet": 98.55072463768116
+   }
+  },
+  "normal|noise6": {
+   "correct": 95.33333333333333,
+   "wrong": 0.0,
+   "unsure": 0.6666666666666666,
+   "lost": 4.0,
+   "no_kpts": 0.0,
+   "ms_median": 62.35629149887245,
+   "by_event": {
+    "wrong single move": 94.31818181818181,
+    "did expected move": 97.11538461538461,
+    "two quick moves": 100.0,
+    "no move yet": 91.30434782608695
+   }
+  },
+  "normal|noise8": {
+   "correct": 81.66666666666667,
+   "wrong": 0.3333333333333333,
+   "unsure": 2.0,
+   "lost": 16.0,
+   "no_kpts": 0.0,
+   "ms_median": 62.68389600154478,
+   "by_event": {
+    "wrong single move": 76.13636363636364,
+    "did expected move": 85.57692307692308,
+    "two quick moves": 89.74358974358974,
+    "no move yet": 78.26086956521739
+   }
+  },
+  "normal|noise12": {
+   "correct": 29.666666666666668,
+   "wrong": 1.6666666666666667,
+   "unsure": 3.3333333333333335,
+   "lost": 65.33333333333333,
+   "no_kpts": 0.0,
+   "ms_median": 63.07502099662088,
+   "by_event": {
+    "wrong single move": 31.818181818181817,
+    "did expected move": 32.69230769230769,
+    "two quick moves": 17.94871794871795,
+    "no move yet": 28.985507246376812
+   }
+  },
+  "hard|gt": {
+   "correct": 91.33333333333333,
+   "wrong": 0.0,
+   "unsure": 0.6666666666666666,
+   "lost": 8.0,
+   "no_kpts": 0.0,
+   "ms_median": 62.581062491517514,
+   "by_event": {
+    "wrong single move": 92.04545454545455,
+    "did expected move": 95.1923076923077,
+    "two quick moves": 87.17948717948718,
+    "no move yet": 86.95652173913044
+   }
+  },
+  "hard|noise2": {
+   "correct": 92.66666666666667,
+   "wrong": 0.0,
+   "unsure": 0.6666666666666666,
+   "lost": 6.666666666666667,
+   "no_kpts": 0.0,
+   "ms_median": 61.911083008453716,
+   "by_event": {
+    "wrong single move": 94.31818181818181,
+    "did expected move": 92.3076923076923,
+    "two quick moves": 87.17948717948718,
+    "no move yet": 94.20289855072464
+   }
+  },
+  "hard|noise4": {
+   "correct": 92.33333333333333,
+   "wrong": 0.0,
+   "unsure": 0.0,
+   "lost": 7.666666666666667,
+   "no_kpts": 0.0,
+   "ms_median": 61.97156250709668,
+   "by_event": {
+    "wrong single move": 94.31818181818181,
+    "did expected move": 93.26923076923077,
+    "two quick moves": 87.17948717948718,
+    "no move yet": 91.30434782608695
+   }
+  },
+  "hard|noise6": {
+   "correct": 86.33333333333333,
+   "wrong": 0.3333333333333333,
+   "unsure": 0.3333333333333333,
+   "lost": 13.0,
+   "no_kpts": 0.0,
+   "ms_median": 61.70931250380818,
+   "by_event": {
+    "wrong single move": 89.77272727272727,
+    "did expected move": 89.42307692307692,
+    "two quick moves": 79.48717948717949,
+    "no move yet": 81.15942028985508
+   }
+  },
+  "hard|noise8": {
+   "correct": 71.0,
+   "wrong": 0.6666666666666666,
+   "unsure": 2.0,
+   "lost": 26.333333333333332,
+   "no_kpts": 0.0,
+   "ms_median": 61.83462549961405,
+   "by_event": {
+    "wrong single move": 69.31818181818181,
+    "did expected move": 74.03846153846153,
+    "two quick moves": 69.23076923076923,
+    "no move yet": 69.56521739130434
+   }
+  },
+  "hard|noise12": {
+   "correct": 24.666666666666668,
+   "wrong": 4.666666666666667,
+   "unsure": 7.666666666666667,
+   "lost": 63.0,
+   "no_kpts": 0.0,
+   "ms_median": 61.872103993664496,
+   "by_event": {
+    "wrong single move": 25.0,
+    "did expected move": 30.76923076923077,
+    "two quick moves": 28.205128205128204,
+    "no move yet": 13.043478260869565
+   }
+  }
+ }
+}

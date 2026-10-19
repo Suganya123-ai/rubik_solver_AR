@@ -1,0 +1,54 @@
+# Builds the Android APK on every push, using game-ci/unity-builder --
+# no local Unity install needed once this is set up. Requires:
+#   1. A real Unity project at `unity-project-path` below (ProjectSettings/,
+#      Packages/, Assets/ -- see xreal_ar/README.md's "One-time local setup
+#      for CI" section for how to create it).
+#   2. NRSDK already imported into that project and committed.
+#   3. Repo secrets: UNITY_LICENSE (base64 .ulf from the activation
+#      workflow), UNITY_EMAIL, UNITY_PASSWORD (your Unity account --
+#      only used to activate the license in CI, never stored elsewhere).
+#
+# Adjust `unity-project-path` and `unityVersion` to match your actual repo
+# layout and the Editor version you built the project with.
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+env:
+  UNITY_PROJECT_PATH: UnityProject # change if your Unity project root lives elsewhere in the repo
+
+jobs:
+  build:
+    name: Build for Android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.UNITY_PROJECT_PATH }}/Library
+          key: Library-${{ env.UNITY_PROJECT_PATH }}
+          restore-keys: Library-
+
+      - uses: game-ci/unity-builder@v4
+        id: build
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: ${{ env.UNITY_PROJECT_PATH }}
+          targetPlatform: Android
+          unityVersion: 2021.3.45f1 # must match the Editor version used to create/open the project locally
+          androidExportType: androidPackage # produces a signed/debug .apk directly, not an app bundle
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RubikSolverAR-apk
+          path: ${{ steps.build.outputs.buildsPath }}
+          retention-days: 30

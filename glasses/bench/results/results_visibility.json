@@ -1,0 +1,17 @@
+{
+ "n": 300,
+ "results": {
+  "F": {
+   "one_move_ambiguous_pct": 100.0,
+   "two_moves_ambiguous_pct": 100.0
+  },
+  "U+F": {
+   "one_move_ambiguous_pct": 4.333333333333333,
+   "two_moves_ambiguous_pct": 51.333333333333336
+  },
+  "U+F+R": {
+   "one_move_ambiguous_pct": 0.0,
+   "two_moves_ambiguous_pct": 0.0
+  }
+ }
+}

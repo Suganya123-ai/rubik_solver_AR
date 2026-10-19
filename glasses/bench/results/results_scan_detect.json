@@ -1,0 +1,137 @@
+{
+ "n": 200,
+ "results": {
+  "Aligned to guide grid, normal light": {
+   "Current app (fixed grid)": {
+    "correct_pct": 100.0,
+    "any_rotation_pct": 100.0,
+    "found_pct": 100.0,
+    "ms_median": 0.009125003998633474,
+    "ms_mean": 0.009512664837529883
+   },
+   "qbr (kkoomen)": {
+    "correct_pct": 0.0,
+    "any_rotation_pct": 0.0,
+    "found_pct": 0.0,
+    "ms_median": 0.9725829950184561,
+    "ms_mean": 1.0081725600321079
+   },
+   "qbr + multi-scale (our tweak)": {
+    "correct_pct": 76.5,
+    "any_rotation_pct": 76.5,
+    "found_pct": 76.5,
+    "ms_median": 3.277354007877875,
+    "ms_mean": 3.877432310109725
+   },
+   "rubiks-cube-tracker (dwalton76)": {
+    "correct_pct": 98.5,
+    "any_rotation_pct": 98.5,
+    "found_pct": 99.5,
+    "ms_median": 90.74272900761571,
+    "ms_mean": 90.87781959497079
+   },
+   "ephynes AR solver (C# port)": {
+    "correct_pct": 0.0,
+    "any_rotation_pct": 0.0,
+    "found_pct": 0.0,
+    "ms_median": 2.1749380030087195,
+    "ms_mean": 2.2207518999493914
+   },
+   "ephynes + multi-scale (our tweak)": {
+    "correct_pct": 45.5,
+    "any_rotation_pct": 74.0,
+    "found_pct": 81.0,
+    "ms_median": 5.484270994202234,
+    "ms_mean": 5.542890660217381
+   }
+  },
+  "Free hand-held, normal light": {
+   "Current app (fixed grid)": {
+    "correct_pct": 0.0,
+    "any_rotation_pct": 0.0,
+    "found_pct": 100.0,
+    "ms_median": 0.008687500667292625,
+    "ms_mean": 0.00892334443051368
+   },
+   "qbr (kkoomen)": {
+    "correct_pct": 14.5,
+    "any_rotation_pct": 14.5,
+    "found_pct": 14.5,
+    "ms_median": 1.0136874989257194,
+    "ms_mean": 1.0218852393882116
+   },
+   "qbr + multi-scale (our tweak)": {
+    "correct_pct": 17.0,
+    "any_rotation_pct": 17.0,
+    "found_pct": 17.0,
+    "ms_median": 5.754791498475242,
+    "ms_mean": 5.087611659619142
+   },
+   "rubiks-cube-tracker (dwalton76)": {
+    "correct_pct": 21.5,
+    "any_rotation_pct": 21.5,
+    "found_pct": 44.0,
+    "ms_median": 85.23241699731443,
+    "ms_mean": 85.81759061955381
+   },
+   "ephynes AR solver (C# port)": {
+    "correct_pct": 31.5,
+    "any_rotation_pct": 55.5,
+    "found_pct": 68.0,
+    "ms_median": 2.4961040035123006,
+    "ms_mean": 2.490656491063419
+   },
+   "ephynes + multi-scale (our tweak)": {
+    "correct_pct": 38.5,
+    "any_rotation_pct": 71.0,
+    "found_pct": 87.5,
+    "ms_median": 2.7424584986874834,
+    "ms_mean": 3.281178115066723
+   }
+  },
+  "Free hand-held, hard conditions": {
+   "Current app (fixed grid)": {
+    "correct_pct": 0.0,
+    "any_rotation_pct": 0.0,
+    "found_pct": 100.0,
+    "ms_median": 0.008916002116166055,
+    "ms_mean": 0.009009174682432786
+   },
+   "qbr (kkoomen)": {
+    "correct_pct": 5.5,
+    "any_rotation_pct": 5.5,
+    "found_pct": 5.5,
+    "ms_median": 1.076541499060113,
+    "ms_mean": 1.0857504002342466
+   },
+   "qbr + multi-scale (our tweak)": {
+    "correct_pct": 6.5,
+    "any_rotation_pct": 6.5,
+    "found_pct": 6.5,
+    "ms_median": 5.901729498873465,
+    "ms_mean": 5.670764805399813
+   },
+   "rubiks-cube-tracker (dwalton76)": {
+    "correct_pct": 16.0,
+    "any_rotation_pct": 16.0,
+    "found_pct": 44.0,
+    "ms_median": 85.2642499958165,
+    "ms_mean": 85.49817481551145
+   },
+   "ephynes AR solver (C# port)": {
+    "correct_pct": 11.0,
+    "any_rotation_pct": 26.5,
+    "found_pct": 37.0,
+    "ms_median": 2.1235829990473576,
+    "ms_mean": 2.1548813043773407
+   },
+   "ephynes + multi-scale (our tweak)": {
+    "correct_pct": 19.0,
+    "any_rotation_pct": 44.5,
+    "found_pct": 59.5,
+    "ms_median": 3.867145991534926,
+    "ms_mean": 3.6716813850944163
+   }
+  }
+ }
+}

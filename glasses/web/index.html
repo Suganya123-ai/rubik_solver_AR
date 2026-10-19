@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cube Tutor AR</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="stage">
+    <video id="video" autoplay playsinline muted></video>
+    <img id="remote-picture" alt="" hidden />
+    <canvas id="overlay"></canvas>
+    <div id="hud"></div>
+    <div id="ghost" hidden>
+      <canvas id="ghost-canvas" aria-label="Ghost cube showing the move"></canvas>
+      <div class="ghost-warning">⚠</div>
+      <div class="ghost-label">AS YOU SEE IT</div>
+    </div>
+    <div id="ui"></div>
+    <div id="controls" hidden>
+      <label>Camera <select id="camera-select" aria-label="Camera"></select></label>
+      <button id="hud-toggle" type="button"></button>
+    </div>
+  </div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
