@@ -9,6 +9,10 @@ export type FrameReply = {
   height: number;
   ms: number;
   keypoints: [number, number][] | null;
+  /** How the cube is held (corner, top_front, front_right, face) and which of the 7 corners the camera
+   *  really sees (the others in keypoints are estimates); null with an older, corner-only model. */
+  hold?: string | null;
+  seen?: boolean[] | null;
   confidence: number | null;
   confident: boolean;
   faces: Record<'U' | 'F' | 'R', [number, number, number][]> | null;

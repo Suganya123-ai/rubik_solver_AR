@@ -13,10 +13,14 @@ SAMPLE_FRACTION = 0.4  # sample the middle 40% of each cell
 
 
 def sticker_quads(kpts):
-    """{face: [9 quads (4x2 float32)]} for the sampled middle of each sticker."""
+    """{face: [9 quads (4x2 float32)]} for the sampled middle of each sticker, for the sides whose
+    4 corners are all seen (a corner not seen is NaN: the cube held edge- or face-on)."""
     lo, hi = (1 - SAMPLE_FRACTION) / 2, (1 + SAMPLE_FRACTION) / 2
     out = {}
+    kpts = np.asarray(kpts, np.float32)
     for face, idx in FACE_CORNERS.items():
+        if np.isnan(kpts[list(idx)]).any():
+            continue
         homography = cv2.getPerspectiveTransform(_UNIT, np.float32([kpts[i] for i in idx]))
         cells = []
         for k in range(9):
@@ -30,9 +34,10 @@ def sticker_quads(kpts):
 
 def read_three_faces(frame, kpts):
     """frame: BGR image; kpts: 7x2 corner points. Returns {face: [9 (r, g, b)]}
-    for faces U, F, R in raster order, or None for a sticker off the frame."""
+    for faces U, F, R in raster order, or None for a sticker off the frame; a side
+    not seen (its corners NaN) is None."""
     h, w = frame.shape[:2]
-    out = {}
+    out = {f: None for f in FACE_CORNERS}
     for face, cells in sticker_quads(kpts).items():
         colours = []
         for quad in cells:

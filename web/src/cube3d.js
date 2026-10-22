@@ -338,13 +338,54 @@
     return solveLinear(A, b);
   }
 
-  // A perspective camera (3x4, last entry fixed to 1) fitted to the 7 corners:
-  // the cube is close to the camera, so perspective matters. Falls back to an
-  // affine fit if that goes wrong. Returns {project(p), eye(p) -> direction
-  // from p toward the camera}.
-  function fitCamera(points2d) {
+  // The sides a hold shows (seen: which of the 7 corners the camera sees; all for corner-on):
+  // top needs corners 2 and 3, right needs 3 and 4; the front is always seen.
+  function sidesSeen(seen) {
+    const out = [[0, 0, 1]];
+    if (seen[2] && seen[3]) out.push([0, 1, 0]);
+    if (seen[3] && seen[4]) out.push([1, 0, 0]);
+    return out;
+  }
+
+  // Face-on (only the front's 4 corners seen, all in one plane): a homography for the front, and
+  // points nearer or further than the front a little larger or smaller around its centre; the
+  // camera looks straight at the front.
+  function fitFront(points2d) {
+    const idx = [0, 1, 5, 6], rows = [], rhs = [];
+    idx.forEach((i) => {
+      const [X, Y] = CORNERS_3D[i], [u, v] = points2d[i];
+      rows.push([X, Y, 1, 0, 0, 0, -u * X, -u * Y]); rhs.push(u);
+      rows.push([0, 0, 0, X, Y, 1, -v * X, -v * Y]); rhs.push(v);
+    });
+    const h = solveLinear(rows, rhs);
+    if (!h) return null;
+    const flat = (x, y) => {
+      const w = h[6] * x + h[7] * y + 1;
+      return [(h[0] * x + h[1] * y + h[2]) / w, (h[3] * x + h[4] * y + h[5]) / w];
+    };
+    const c = flat(0, 0);
+    return {
+      project: (q) => {
+        const p = flat(q[0], q[1]), k = 1 + 0.08 * (q[2] - 1.5);
+        return [c[0] + (p[0] - c[0]) * k, c[1] + (p[1] - c[1]) * k];
+      },
+      eye: () => [0, 0, 1],
+    };
+  }
+
+  // A perspective camera (3x4, last entry fixed to 1) fitted to the corners
+  // seen (all 7 corner-on, 6 edge-on): the cube is close to the camera, so
+  // perspective matters. Falls back to an affine fit if that goes wrong, and
+  // face-on (4 corners in one plane) to fitFront. Returns {project(p),
+  // eye(p) -> direction from p toward the camera}.
+  function fitCamera(points2d, seen) {
+    seen = seen || CORNERS_3D.map(() => true);
+    const idx = CORNERS_3D.map((_, i) => i).filter((i) => seen[i]);
+    const sides = sidesSeen(seen);
+    if (idx.length < 6) return fitFront(points2d);
     const rows = [], rhs = [];
-    CORNERS_3D.forEach(([X, Y, Z], i) => {
+    idx.forEach((i) => {
+      const [X, Y, Z] = CORNERS_3D[i];
       const [u, v] = points2d[i];
       rows.push([X, Y, Z, 1, 0, 0, 0, 0, -u * X, -u * Y, -u * Z]); rhs.push(u);
       rows.push([0, 0, 0, 0, X, Y, Z, 1, -v * X, -v * Y, -v * Z]); rhs.push(v);
@@ -357,32 +398,45 @@
         return [0, 1].map((r) => (P[r][0] * q[0] + P[r][1] * q[1] + P[r][2] * q[2] + P[r][3]) / w);
       };
       const centre = solveLinear(P.map((r) => r.slice(0, 3)), P.map((r) => -r[3]));  // camera position
-      const err = Math.max(...CORNERS_3D.map((q, i) => Math.hypot(project(q)[0] - points2d[i][0], project(q)[1] - points2d[i][1])));
-      const size = Math.hypot(points2d[2][0] - points2d[5][0], points2d[2][1] - points2d[5][1]);
-      if (centre && dot(centre, [1, 1, 1]) > 0 && Math.hypot(...centre) > 3 && err < 0.08 * size) {
+      const err = Math.max(...idx.map((i) => Math.hypot(project(CORNERS_3D[i])[0] - points2d[i][0], project(CORNERS_3D[i])[1] - points2d[i][1])));
+      const size = spread(points2d, seen);
+      // the camera in front of every side it sees (corner-on, as before: roughly toward Top-Front-Right)
+      const facing = idx.length === 7 ? centre && dot(centre, [1, 1, 1]) > 0 : centre && sides.every((n) => dot(centre, n) > 1.5);
+      if (facing && Math.hypot(...centre) > 3 && err < 0.08 * size) {
         return { project, eye: (q) => sub(centre, q) };
       }
     }
     // Affine fallback: the viewing direction is the same everywhere.
-    const rowsA = CORNERS_3D.map((q) => [q[0], q[1], q[2], 1]);
-    const a = leastSquares(rowsA, points2d.map((q) => q[0])), b = leastSquares(rowsA, points2d.map((q) => q[1]));
+    const rowsA = idx.map((i) => [...CORNERS_3D[i], 1]);
+    const a = leastSquares(rowsA, idx.map((i) => points2d[i][0])), b = leastSquares(rowsA, idx.map((i) => points2d[i][1]));
+    if (!a || !b) return fitFront(points2d);
     let toward = cross(a.slice(0, 3), b.slice(0, 3));
-    if (dot(toward, [1, 1, 1]) < 0) toward = scale(toward, -1);  // the camera sees Top, Front, Right
+    if (dot(toward, sides.reduce(add, [0, 0, 0])) < 0) toward = scale(toward, -1);  // the camera sees the sides it sees
     return {
       project: (q) => [a[0] * q[0] + a[1] * q[1] + a[2] * q[2] + a[3], b[0] * q[0] + b[1] * q[1] + b[2] * q[2] + b[3]],
       eye: () => toward,
     };
   }
 
+  // How big the cube looks: the larger side of the box around the corners seen.
+  function spread(points2d, seen) {
+    const pts = points2d.filter((_, i) => !seen || seen[i]);
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    return Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  }
+
   // Draws `move` on the camera picture: the stickers that will turn, and an
   // arrow around their layer (sweeping, so it reads as motion). keypoints:
   // the 7 corners in canvas pixels. undo: draw it as an undo step (amber).
+  // seen: which corners the camera sees (the cube held edge- or face-on; default all).
   function drawMoveOnVideo(ctx, keypoints, move, opts = {}) {
     if (!move || !keypoints || keypoints.length !== 7) return;
     const m = parseMove(move);
-    const cam = fitCamera(keypoints);
+    const cam = fitCamera(keypoints, opts.seen);
+    if (!cam) return;
     const colour = opts.undo ? UNDO : ARROW;
-    const size = Math.hypot(keypoints[2][0] - keypoints[5][0], keypoints[2][1] - keypoints[5][1]);  // top to bottom
+    const size = opts.seen && !opts.seen.every(Boolean) ? spread(keypoints, opts.seen)   // (corner-on: top to bottom, as before)
+      : Math.hypot(keypoints[2][0] - keypoints[5][0], keypoints[2][1] - keypoints[5][1]);
     ctx.save();
     for (const [p, d] of STICKERS) {  // the turning layer's visible stickers
       if (p[m.axis] !== m.side || dot(d, cam.eye(add(p, scale(d, 0.5)))) <= 0) continue;
@@ -408,5 +462,5 @@
   }
 
   if (typeof window !== 'undefined') { window.CubeHologram = CubeHologram; window.drawMoveOnVideo = drawMoveOnVideo; }
-  if (typeof module !== 'undefined') module.exports = { applyMove, parseMove, STICKERS, fitCamera, arcPoints };
+  if (typeof module !== 'undefined') module.exports = { applyMove, parseMove, STICKERS, fitCamera, arcPoints, drawMoveOnVideo };
 })();

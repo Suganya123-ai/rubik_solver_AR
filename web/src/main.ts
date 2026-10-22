@@ -95,13 +95,13 @@ function frame(now: number): void {
   let corners: [number, number][] | null = null;
   if (cube.keypoints && alpha > 0) {
     corners = cube.keypoints.map((p) => view.fromFrame(p, cube.frameW));
-    drawCubeBox(ctx, corners, alpha * (flow.guide ? 0.5 : 1), `CUBE ${Math.round(cube.confidence * 100)}%`);
+    drawCubeBox(ctx, corners, alpha * (flow.guide ? 0.5 : 1), `CUBE ${Math.round(cube.confidence * 100)}%`, cube.seen);
     if (flow.guide && alpha > 0.5) {
-      drawMoveArrows(ctx, view, cube.keypoints, cube.frameW, flow.guide.move, flow.guide.undo, now);
+      drawMoveArrows(ctx, view, cube.keypoints, cube.frameW, flow.guide.move, flow.guide.undo, now, cube.seen);
     }
   }
   drawHands(ctx, hands.hands, view, video.videoHeight || 720, state.error);
-  effects.draw(ctx, now, corners, innerWidth, innerHeight);
+  effects.draw(ctx, now, corners, innerWidth, innerHeight, cube.seen);
   placeGhost(alpha > 0.5 ? corners : null);
 
   frames.push(now);
@@ -110,7 +110,10 @@ function frame(now: number): void {
                  serverMs: link.serverMs, confidence: cube.confident ? cube.confidence : 0, connected: link.connected });
   const active = state.phase === 'camera' || state.phase === 'scan' || state.phase === 'guided' || state.phase === 'undo';
   const lostCube = active && link.connected && now - lastConfident > HINT_AFTER_MS;
-  hud.showHint(lostCube, !lostCube && active && corners && faceOn(corners)
+  // Three sides needed: always with an older, corner-only model; with the any-hold model (which
+  // follows the cube held any way while solving) only for the scan.
+  const needCorner = cube.hold ? state.phase === 'scan' && cube.hold !== 'corner' : corners !== null && faceOn(corners);
+  hud.showHint(lostCube, !lostCube && active && corners && needCorner
     ? 'Tilt the cube so you see three sides -- a corner pointing at the camera' : undefined);
 }
 

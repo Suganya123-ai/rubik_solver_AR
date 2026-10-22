@@ -9,7 +9,8 @@ import { CYAN, MONO, glow } from './theme';
 const EDGES = [[0, 1], [1, 2], [2, 3], [3, 0], [0, 5], [1, 6], [3, 4], [4, 5], [5, 6], [2, 7], [6, 7], [4, 7]];
 const HIDDEN = new Set([9, 10, 11]); // edges to the hidden corner: drawn fainter
 
-export function drawCubeBox(ctx: CanvasRenderingContext2D, corners: Pt[], alpha: number, label: string): void {
+export function drawCubeBox(ctx: CanvasRenderingContext2D, corners: Pt[], alpha: number, label: string,
+                            seen: boolean[] | null = null): void {
   const c = [...corners, [corners[2][0] + corners[6][0] - corners[1][0], corners[2][1] + corners[6][1] - corners[1][1]] as Pt];
   const xs = c.map((p) => p[0]), ys = c.map((p) => p[1]);
   const size = Math.max(...xs) - Math.min(...xs);
@@ -18,7 +19,8 @@ export function drawCubeBox(ctx: CanvasRenderingContext2D, corners: Pt[], alpha:
   glow(ctx, CYAN, 6);
   ctx.strokeStyle = CYAN;
   EDGES.forEach(([a, b], i) => {
-    ctx.globalAlpha = alpha * (HIDDEN.has(i) ? 0.25 : 0.7);
+    const unseen = HIDDEN.has(i) || (seen !== null && (!seen[a] || !seen[b]));   // (held edge- or face-on)
+    ctx.globalAlpha = alpha * (unseen ? 0.25 : 0.7);
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(...c[a]); ctx.lineTo(...c[b]); ctx.stroke();
   });

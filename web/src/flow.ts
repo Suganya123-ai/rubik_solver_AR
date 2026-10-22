@@ -9,7 +9,7 @@
 
 import type { AppState } from './appState';
 import type { Effects } from './overlay/effects';
-import { POSITION, describe, holdHint } from './moveText';
+import { POSITION, describe } from './moveText';
 import { type Command, Voice } from './voice';
 import type { FrameReply, Message, ServerLink } from './serverLink';
 
@@ -21,7 +21,19 @@ export type Track = { phase: string; step: number; total: number; move: string |
   plan_move: string | null; event: string | null; message: string | null; state: string;
   face_colors: Record<string, string>; steady: number; needed: number;
   /** The right side turned by the wrong amount: [what was done, what was asked]; the move shown is the one-turn fix. */
-  fix?: [string, string] | null };
+  fix?: [string, string] | null;
+  /** The cube held any way round: the sides the camera sees (of U, F, R, named from the camera), whether
+   *  it shows too little to tell which way round it is, and whether the move's side can't be seen. */
+  sides?: string; hold_unsure?: boolean; move_hidden?: boolean };
+
+const ANY_HOLD = 'Any way round: a corner, an edge or one side toward the camera. Two or three sides showing works best.';
+
+/** A line to add when the camera can't follow the move from how the cube is held. */
+function holdTip(t: Track): string {
+  if (t.move_hidden) return ' The camera can\'t see that side from here: tilt the cube so it sees the top as well.';
+  if (t.hold_unsure) return ' Tilt the cube a little so the camera sees two sides.';
+  return '';
+}
 
 const FACES = ['U', 'R', 'F', 'D', 'L', 'B'];
 const NET: Record<string, [number, number]> = { U: [1, 0], L: [0, 1], F: [1, 1], R: [2, 1], B: [3, 1], D: [1, 2] };
@@ -372,7 +384,7 @@ export class Flow {
     }
     if (t.phase === 'home') {
       this.el.popup.hidden = true;
-      this.card('Get ready', '', 'Hold the cube like in the first scan', holdHint(t.face_colors), buttons);
+      this.card('Get ready', '', 'Hold the cube up to the camera', `${ANY_HOLD} Then hold it still for a moment.`, buttons);
       return;
     }
     const m = moveWords(t.move ?? '', t.face_colors);
@@ -409,22 +421,22 @@ export class Flow {
     this.el.popup.hidden = true;
     if (t.event === 'reoriented') {
       this.holdUntil = now + 2500;
-      this.card('Got it', chip, m.title, `Following the cube the way you're holding it. ${m.how}`, buttons, 'good');
+      this.card('Got it', chip, m.title, `Following the cube the way you're holding it. ${m.how}${holdTip(t)}`, buttons, 'good');
       return;
     }
     if (t.event === 'correct' || t.event === 'undone' || t.event === 'replanned') {
       this.holdUntil = now + 1200;
       this.card(t.event === 'undone' ? '✓ Undone -- back on track' : t.event === 'replanned' ? 'New plan' : '✓ Correct',
-        chip, m.title, `${m.how} (move ${t.step} of ${t.total})`, buttons, 'good');
+        chip, m.title, `${m.how}${holdTip(t)} (move ${t.step} of ${t.total})`, buttons, 'good');
       return;
     }
     if (t.event === 'lost') {
-      this.card('Lost the cube', '!', 'Bring the cube back into view', holdHint(t.face_colors), buttons, 'warn');
+      this.card('Lost the cube', '!', 'Bring the cube back into view', ANY_HOLD, buttons, 'warn');
       this.holdUntil = now + 3000;
       return;
     }
     if (now < this.holdUntil) return;
-    this.card(`Move ${t.step} of ${t.total}`, chip, m.title, `${m.how} Then hold the cube still.`, buttons);
+    this.card(`Move ${t.step} of ${t.total}`, chip, m.title, `${m.how}${holdTip(t)} Then hold the cube still.`, buttons);
   }
 
   /** The server's "You did U instead of L" in colours. */

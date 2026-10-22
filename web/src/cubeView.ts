@@ -14,6 +14,9 @@ export class CubeView {
   frameW = 640;
   confidence = 0;
   confident = false;
+  /** How the cube is held and which corners are really seen (null: an older model, corner-on only). */
+  hold: string | null = null;
+  seen: boolean[] | null = null;
   lastSeen = -Infinity;
   private target: Pt[] | null = null;
 
@@ -23,6 +26,8 @@ export class CubeView {
     this.confident = reply.confident;
     if (reply.keypoints) {
       this.target = reply.keypoints;
+      this.hold = reply.hold ?? null;
+      this.seen = reply.seen ?? null;
       this.lastSeen = now;
       if (!this.keypoints) this.keypoints = reply.keypoints.map((p) => [p[0], p[1]] as Pt);
     }

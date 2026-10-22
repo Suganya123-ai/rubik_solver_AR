@@ -101,7 +101,7 @@ def test_waits_for_home_position_and_reports_lost_after_a_while():
     st = _hold(s, apply_moves(CubeState(state.arr.copy()), ['U2', 'R2', 'F2', 'L2']).arr)
     assert st['phase'] == 'home' and not s.home_ok          # not in the first position yet
     waiting = s.feed({'keypoints': None}, now=CLOCK[0] + 10)
-    assert waiting['event'] is None and 'first position' in waiting['message']  # waiting isn't "lost"
+    assert waiting['event'] is None and 'any way round' in waiting['message']  # waiting isn't "lost"
     assert _hold(s, s.letters)['event'] == 'home'
     s.feed({'keypoints': None}, now=CLOCK[0] + 1)
     assert s.feed({'keypoints': None}, now=CLOCK[0] + 10)['event'] == 'lost'  # nothing usable for > 3 s mid-solve
@@ -287,3 +287,122 @@ def test_another_side_still_gets_undo():
     wrong = _wrong_move(s)
     st = _hold(s, apply_moves(cube, [wrong]).arr)
     assert st['event'] == 'wrong' and st['undo'] and st['fix'] is None
+
+
+# ---------- any hold: the cube turned to show other sides, edge-on or face-on ----------
+from vision.tracker import _TURNS  # noqa: E402
+
+
+def _view_frame(phys, sides):
+    """A frame showing only `sides` (of U, F, R, named from the camera) of the cube `phys`
+    (54 colour letters, in the camera's naming)."""
+    fr = _frame(phys)
+    fr['faces'] = {f: (fr['faces'][f] if f in sides else None) for f in 'UFR'}
+    if sides == 'F':
+        fr['keypoints'] = FACE_ON.tolist()
+    return fr
+
+
+def _hold_view(session, phys, sides, frames=STEADY_FRAMES):
+    out = None
+    for _ in range(frames):
+        CLOCK[0] += 0.1
+        st = session.feed(_view_frame(phys, sides), now=CLOCK[0])
+        out = out if out and out.get('event') else st     # the first event
+    return out
+
+
+def _turn(phys, k):
+    """The whole cube turned the k-th way (of _TURNS), as the camera now sees it."""
+    return phys[_TURNS[k][1]]
+
+
+def _quarter(axis_row):
+    """Index in _TURNS of a quarter turn of the whole cube (about x, y or z)."""
+    for k, (m, _, _) in enumerate(_TURNS):
+        if np.trace(m) == 1 and m[axis_row, axis_row] == 1:
+            return k
+
+
+FACE_ON = np.array([[420, 140], [220, 140], [250, 170], [390, 170], [390, 310], [420, 340], [220, 340]], float)
+
+
+def _spin(session, phys, way, sides='F'):
+    """Turns the whole cube a quarter in the picture's plane (way +1: counterclockwise as the camera
+    sees it), frame by frame, the model naming the corners from the view as it does: past 45 degrees
+    the top edge is another one. Returns the cube as the camera now names it."""
+    from vision.tracker import _SPIN
+    c = FACE_ON[[0, 1, 5, 6]].mean(axis=0)
+    for deg in range(15, 91, 15):
+        q = int(np.floor(deg / 90 + 0.5))
+        a = -np.radians(way * (deg - 90 * q))          # (y points down in the picture)
+        rot = np.array([[np.cos(a), -np.sin(a)], [np.sin(a), np.cos(a)]])
+        view = phys[_SPIN[way][1]] if q else phys
+        fr = _view_frame(view, sides)
+        fr['keypoints'] = ((FACE_ON - c) @ rot.T + c).tolist()
+        CLOCK[0] += 0.1
+        session.feed(fr, now=CLOCK[0])
+    return phys[_SPIN[way][1]]
+
+
+def test_follows_the_cube_held_any_way_round():
+    """The whole solve, the cube turned a quarter turn now and then and held corner-on,
+    edge-on (two sides) or face-on (one side, turned in the picture's plane too): every
+    move is followed."""
+    state = _scrambled(11)
+    s = _session(state)
+    assert _hold(s, s.letters)['event'] == 'home'
+    phys = state.arr.copy()
+    plan = [(_quarter(0), 'UF'), (_quarter(1), 'FR'), (+1, 'F'), (_quarter(1), 'UFR'), (-1, 'F'),
+            (_quarter(0), 'UF'), (_quarter(1), 'F')]
+    steps = 0
+    while not s.solved and steps < 40:
+        if steps % 3 == 0:  # turn the whole cube to show other sides, and hold it another way
+            turn, sides = plan[(steps // 3) % len(plan)]
+            if sides == 'F' and turn in (1, -1):
+                phys = _spin(s, phys, turn)
+            else:
+                phys = _turn(phys, turn)
+            _hold_view(s, phys, sides, STEADY_FRAMES * 2)
+        steps += 1
+        if s.status()['move_hidden']:  # the back side, held face-on: as the tutor asks, show the top too
+            assert sides == 'F' and s.plan[s.step][0] == 'B'
+            sides = 'UF'
+        move = s.plan[s.step]
+        phys = apply_moves(CubeState(phys), [move]).arr
+        st = _hold_view(s, phys, sides, STEADY_FRAMES * 2)
+        assert st['event'] in ('correct', 'solved'), (steps, sides, move, st)
+    assert s.solved
+
+
+def test_turning_the_front_is_not_taken_for_turning_the_cube():
+    """Face-on, the front side turned (the corners stay put) is a move, not the cube turned."""
+    state = _scrambled(13)
+    s = _session(state)
+    assert _hold(s, s.letters)['event'] == 'home'
+    phys = _turn(state.arr.copy(), _quarter(1))
+    _hold_view(s, phys, 'F', STEADY_FRAMES * 2)
+    phys = _spin(s, phys, +1)
+    _hold_view(s, phys, 'F', STEADY_FRAMES * 2)
+    assert s.counts.get('spun') == 1
+    move = s.plan[s.step]
+    phys = apply_moves(CubeState(phys), [move]).arr
+    for _ in range(STEADY_FRAMES * 2):
+        CLOCK[0] += 0.1
+        fr = _view_frame(phys, 'F')
+        fr['keypoints'] = FACE_ON.tolist()
+        st = s.feed(fr, now=CLOCK[0])
+        if st.get('event'):
+            break
+    assert st['event'] == 'correct', st
+
+
+def test_a_wrong_move_seen_face_on_is_caught():
+    state = _scrambled(12)
+    s = _session(state)
+    assert _hold(s, s.letters)['event'] == 'home'
+    expected = s.plan[0]
+    wrong = next(m for m in ALL_MOVES if m[0] not in (expected[0], 'B'))
+    phys = apply_moves(state, [wrong]).arr
+    st = _hold_view(s, phys, 'F')
+    assert st['event'] == 'wrong' and wrong in st['message']

@@ -30,13 +30,14 @@ export class Effects {
   get busy(): boolean { return this.confetti.length > 0; }
 
   /** corners: the cube's 7 corners on screen (or null). */
-  draw(ctx: CanvasRenderingContext2D, now: number, corners: Pt[] | null, w: number, h: number): void {
-    if (corners && now < this.checkUntil) this.drawCheck(ctx, now, corners);
+  draw(ctx: CanvasRenderingContext2D, now: number, corners: Pt[] | null, w: number, h: number,
+       seen: boolean[] | null = null): void {
+    if (corners && now < this.checkUntil) this.drawCheck(ctx, now, corners, seen);
     if (now - this.heartbeatStart < 2200) this.drawHeartbeat(ctx, now - this.heartbeatStart, w, h);
     if (this.confetti.length) this.drawConfetti(ctx, h);
   }
 
-  private drawCheck(ctx: CanvasRenderingContext2D, now: number, c: Pt[]): void {
+  private drawCheck(ctx: CanvasRenderingContext2D, now: number, c: Pt[], seen: boolean[] | null): void {
     const t = (now - this.checkStart) / 900;
     const alpha = t < 0.7 ? 1 : 1 - (t - 0.7) / 0.3;
     ctx.save();
@@ -44,7 +45,7 @@ export class Effects {
     glow(ctx, GREEN, 12);
     ctx.strokeStyle = GREEN;
     ctx.lineWidth = 2;
-    for (const side of SIDES) {  // 3x3 grid on each visible side
+    for (const side of SIDES.filter((s) => !seen || s.every((i) => seen[i]))) {  // 3x3 grid on each visible side
       const q = side.map((i) => c[i]);
       const at = (u: number, v: number): Pt => {
         const top = [q[0][0] + (q[1][0] - q[0][0]) * u, q[0][1] + (q[1][1] - q[0][1]) * u];

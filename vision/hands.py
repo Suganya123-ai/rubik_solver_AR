@@ -122,7 +122,7 @@ def covered_stickers(kpts, hands, frame=None, faces=None):
                 palm = cv2.convexHull(pts[PALM].astype(np.float32))
                 near = cv2.pointPolygonTest(palm, (float(centre[0]), float(centre[1])), False) >= 0 or \
                     min(_segment_distance(centre, pts[a], pts[b]) for a, b in BONES) < FINGER_REACH * cell
-                if near and (skin is None or faces is None or faces[face][i] is None or
+                if near and (skin is None or faces is None or faces[face] is None or faces[face][i] is None or
                              np.linalg.norm(rgb_to_lab(faces[face][i]) - skin) < SKIN_DELTA_E):
                     out[face][i] = True
                     break

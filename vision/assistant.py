@@ -56,7 +56,10 @@ small 3D cube showing it), then the person holds the cube still so the camera ca
 move. Wrong: it says how to undo it, then the same plan carries on; after several mistakes it makes a new plan.
 - Voice: it says every step; the person can say next (the move is done but the camera missed it), repeat, \
 scan, solve, new plan, stop, quiet, speak, help, or ask a question like this one.
-- Holding: three sides should face the camera, and fingers should stay off the stickers when holding still."""
+- Holding while solving: any way round (a corner, an edge or one side toward the camera); the tutor follows the \
+cube when it is turned to show other sides. Two or three sides showing works best; with one side showing, a move \
+of the side facing the person can't be seen, so the tutor asks them to tilt the cube. Fingers should stay off the \
+stickers when holding still. (The scan still needs three sides at once.)"""
 
 REPORT = """Write a short report of this solving session for the person who just solved the cube: two or three \
 spoken sentences (at most about 60 words), warm and specific, from the facts only (time, moves, mistakes, help \

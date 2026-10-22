@@ -4,6 +4,14 @@ Keypoint order (fixed by how the model was trained): 0 is the corner nearest
 the camera (Front-Right-Top), then 1 Front-Left-Top, 2 Back-Left-Top,
 3 Back-Right-Top, 4 Back-Right-Bottom, 5 Front-Right-Bottom,
 6 Front-Left-Bottom -- the hexagon you see when the cube is held corner-on.
+
+The any-hold model (cube_pose_anyhold.pt) also says how the cube is held, named from the camera's
+point of view, and which of the 7 corners it can see (bench/make_yolo_data_anyhold.py):
+    corner       top, front and right seen       all 7
+    top_front    top and front (an edge toward the camera)     4 hidden
+    front_right  front and right (a vertical edge toward it)   2 hidden
+    face         only the front                                2, 3, 4 hidden
+Older models only know corner-on.
 """
 import os
 
@@ -16,8 +24,14 @@ _MODELS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 from .current_model import current_model  # noqa: E402
 
 # The self-improving loop's promoted model (models/current.json) comes first, then the newest built-in.
-MODEL_PATH = os.environ.get('RUBIK_MODEL') or (current_model('cube', 'cube_pose_v3.pt')
-                                               if os.path.exists(os.path.join(_MODELS, 'current.json')) else None) or next((os.path.join(_MODELS, m) for m in ('cube_pose_real.pt', 'cube_pose_v3.pt', 'cube_pose_v2.pt', 'cube_pose_synthetic.pt')
+HOLDS = ('corner', 'top_front', 'front_right', 'face')
+HIDDEN = {'corner': (), 'top_front': (4,), 'front_right': (2,), 'face': (2, 3, 4)}
+SIDES_SEEN = {'corner': 'UFR', 'top_front': 'UF', 'front_right': 'FR', 'face': 'F'}
+
+# The any-hold model, when there is one, comes before the self-improving loop's (corner-only) models.
+_ANYHOLD = os.path.join(_MODELS, 'cube_pose_anyhold.pt')
+MODEL_PATH = os.environ.get('RUBIK_MODEL') or (_ANYHOLD if os.path.exists(_ANYHOLD) else None) or (current_model('cube', 'cube_pose_v3.pt')
+                                               if os.path.exists(os.path.join(_MODELS, 'current.json')) else None) or next((os.path.join(_MODELS, m) for m in ('cube_pose_anyhold.pt', 'cube_pose_real.pt', 'cube_pose_v3.pt', 'cube_pose_v2.pt', 'cube_pose_synthetic.pt')
                    if os.path.exists(os.path.join(_MODELS, m))), os.path.join(_MODELS, 'cube_pose_synthetic.pt'))
 
 
@@ -43,7 +57,13 @@ class CubeDetector:
 
     def detect(self, frame, min_confidence=0.25):
         """frame: BGR image. Returns (7x2 float32 keypoints in frame pixels,
-        confidence) for the most confident cube, or None."""
+        confidence) for the most confident cube, or None. Hidden corners (a cube not held
+        corner-on) are estimated (complete())."""
+        found = self.detect_hold(frame, min_confidence)
+        return None if found is None else (complete(found[0], found[2]), found[1])
+
+    def detect_hold(self, frame, min_confidence=0.25):
+        """Like detect, but returns (7x2 keypoints with NaN for the corners not seen, confidence, hold)."""
         result = self.model.predict(frame, imgsz=640, device=self.device, verbose=False)[0]
         if result.keypoints is None or len(result.boxes) == 0:
             return None
@@ -51,7 +71,27 @@ class CubeDetector:
         confidence = float(result.boxes.conf[best])
         if confidence < min_confidence:
             return None
-        return result.keypoints.xy[best].cpu().numpy().astype(np.float32), confidence
+        kpts = result.keypoints.xy[best].cpu().numpy().astype(np.float32)
+        names = self.model.names
+        hold = names[int(result.boxes.cls[best])] if len(names) > 1 else 'corner'
+        hold = hold if hold in HIDDEN else 'corner'
+        kpts[list(HIDDEN[hold])] = np.nan
+        return kpts, confidence, hold
+
+
+def complete(kpts, hold):
+    """All 7 corners, the hidden ones estimated from the seen ones (for drawing a box, or labels):
+    across a side as a parallelogram; for a face held straight on, the back corners a little
+    smaller behind the front ones."""
+    k = np.array(kpts, np.float32)
+    if hold == 'top_front':
+        k[4] = k[3] + k[5] - k[0]
+    elif hold == 'front_right':
+        k[2] = k[1] + k[3] - k[0]
+    elif hold == 'face':
+        c = k[[0, 1, 5, 6]].mean(axis=0)
+        k[2], k[3], k[4] = (c + (k[i] - c) * 0.82 for i in (1, 0, 5))
+    return k
 
 
 _detector = None

@@ -1,6 +1,9 @@
-"""Live move tracking: watches the three visible sides (cube held in the home
-position: Top, Front and Right toward the camera) and works out what the user
-did, by comparing the picture with every outcome the app can predict.
+"""Live move tracking: watches the visible sides and works out what the user
+did, by comparing the picture with every outcome the app can predict. The cube
+can be held any way round: corner-on (top, front and right seen), edge-on (two
+sides) or face-on (one side); the sides are named from the camera's point of
+view, and when the cube is turned to show other sides the tracking follows
+(_reorient).
 
 Each candidate (no move, any single move, any two quick moves) is a reordering
 of the 54 stickers, precomputed once; scoring all ~290 against the camera is a
@@ -32,7 +35,7 @@ MAX_MOVE = 0.03          # fraction of the cube's size per 1/15 s (more allowed 
 FRAME_GAP = 1 / 15
 LOST_AFTER_S = 3.0
 MAX_UNDO = 3              # more mistakes than this to undo: make a new plan instead
-HOME_MESSAGE = 'Turn the cube back to the first position: Top, Front and Right toward the camera.'
+HOLD_MESSAGE = 'Hold the cube up to the camera, any way round. Two or three sides showing works best.'
 
 
 def _candidates():
@@ -101,6 +104,12 @@ def _whole_cube_turns():
 
 
 _TURNS = _whole_cube_turns()
+# The whole cube turned a quarter in the picture's plane (about the line of sight), as seen by the
+# camera: counterclockwise (the right side comes to the top) and clockwise (the left side does).
+_SPIN = {+1: next(t for t in _TURNS if t[2]['R'] == 'U' and t[2]['F'] == 'F'),
+         -1: next(t for t in _TURNS if t[2]['L'] == 'U' and t[2]['F'] == 'F')}
+SPIN_JUMP_DEG = 50     # the front's top edge turning more than this between two frames: its corners were renamed
+SPIN_GAP_S = 0.35      # ...between frames this close together
 REORIENT_GAIN = 0.85  # another way of holding the cube must fit this much better (score ratio) to switch to it
 WELL_FITTING = 12.0   # a judgement fitting this well (per sticker) with at most one move is trusted as is
 
@@ -114,12 +123,20 @@ _CAND_VISIBLE = np.stack([idx[_VISIBLE] for _, idx in _CANDIDATES])   # (n, 27) 
 
 
 def reading_features(reading):
-    """reader output {U,F,R: [9 rgb]} -> (27, 3) colour features (see
-    color_feature: shading-tolerant) in _VISIBLE order."""
-    return np.array([color_feature(rgb) for f in 'UFR' for rgb in reading[f]])
+    """reader output {U,F,R: [9 rgb] or None (not seen)} -> (27, 3) colour features (see
+    color_feature: shading-tolerant) in _VISIBLE order; a side not seen reads as zeros."""
+    return np.array([color_feature(rgb) if reading[f] is not None else (0.0, 0.0, 0.0)
+                     for f in 'UFR' for rgb in (reading[f] or [None] * 9)])
 
 
-MIN_VISIBLE = 12  # fewer stickers than this in view (hands over the rest): don't judge
+def sides_seen(reading):
+    """The sides read in this frame (of U, F, R), e.g. 'F' for a cube held face-on."""
+    return ''.join(f for f in 'UFR' if reading.get(f) is not None and None not in reading[f])
+
+
+MIN_VISIBLE = 9   # fewer stickers than this in view (one side; hands over the rest): don't judge
+OPPOSITE = {'U': 'D', 'D': 'U', 'F': 'B', 'B': 'F', 'R': 'L', 'L': 'R'}
+HOLD_TIE = 1.5    # ways of holding the cube that fit within this (per sticker) of the best look the same
 
 
 def decide(state_letters, obs, refs, expected=None, visible=None, info=None):
@@ -201,6 +218,9 @@ class TrackSession:
         self._lost_reported = False
         self.history = []
         self.fixing = None             # (done, asked) while the move shown is an amount fix (amount_fix)
+        self.sides = 'UFR'             # the sides seen in the last frame (U, F, R named from the camera)
+        self.hold_unsure = False       # the cube shows too little to tell which way round it is held
+        self._face_angle = None        # (angle of the front's top edge, time), held face-on (_follow_spin)
 
     @property
     def solved(self):
@@ -211,7 +231,7 @@ class TrackSession:
         move made meanwhile). If one fits clearly better, switches to it:
         the state, colours, plan and undo list are renamed to the new
         orientation (the same physical moves), and tracking carries on."""
-        best = None
+        fits = []
         for m, perm, rename in _TURNS:
             if np.array_equal(m, np.eye(3)):
                 continue
@@ -219,33 +239,65 @@ class TrackSession:
             refs = {rename[x]: v for x, v in self.refs.items()}
             info = {}
             verdict, moves, _ = decide(letters, obs, refs, None, visible, info)
-            if verdict == 'ok' and len(moves) <= 1 and (best is None or info['per_sticker'] < best[0]):
-                best = (info['per_sticker'], perm, rename)
-        if best is None or best[0] > REORIENT_GAIN * score_now:
+            if verdict == 'ok' and len(moves) <= 1:
+                fits.append((info['per_sticker'], m, perm, rename, len(moves)))
+        if not fits or min(f[0] for f in fits) >= REORIENT_GAIN * score_now:
             return False
-        _, perm, rename = best
+        # With few sides seen (one side, nearly solved) several ways of holding it can look the same
+        # (face-on, the cube held a quarter turn round looks like the front side turned): take the one
+        # with no move made while it was being turned round, then the smallest turn from how it was
+        # held (people turn the cube a quarter turn at a time).
+        top = min(f[0] for f in fits)
+        ties = [f for f in fits if f[0] <= top + HOLD_TIE]
+        _, m, perm, rename, _ = max(ties, key=lambda f: (f[4] == 0, np.trace(f[1]), -f[0]))
+        nxt = self._expected()
+        self.hold_unsure = bool(nxt) and len({rename_move(nxt, f[3]) for f in ties}) > 1
+        self._turn_whole(perm, rename)
+        self._count('reoriented')
+        return True
+
+    def _turn_whole(self, perm, rename):
+        """The cube is now held turned (one of _TURNS): rename the state, colours, plan and undo list."""
         self.letters = np.array([rename[x] for x in self.letters[perm]])
         self.refs = {rename[x]: v for x, v in self.refs.items()}
         self.face_colors = {rename[x]: c for x, c in self.face_colors.items()}
         self.plan = [rename_move(mv, rename) for mv in self.plan]
         self.off = [rename_move(mv, rename) for mv in self.off]
+        if self.fixing:
+            self.fixing = tuple(rename_move(mv, rename) for mv in self.fixing)
         if self._resume_letters is not None:
             self._resume_letters = np.array([rename[x] for x in np.asarray(self._resume_letters)[perm]])
-        self._count('reoriented')
-        return True
+
+    def _follow_spin(self, kpts, seen, now):
+        """Face-on, turning the front side and turning the whole cube in the picture's plane look the
+        same in the front's 9 stickers; the corners tell them apart. The model names the corners from
+        the view (the top edge is the one nearest level), so as the whole cube turns, the top edge's
+        angle swings past 45 degrees and jumps back by a quarter turn: follow that. Turning only the
+        front side leaves the corners where they were."""
+        if seen != 'F':
+            self._face_angle = None
+            return
+        k = np.asarray(kpts, float)
+        angle = float(np.degrees(np.arctan2(*(k[0] - k[1])[::-1])))
+        prev, self._face_angle = self._face_angle, (angle, now)
+        if prev is None or now - prev[1] > SPIN_GAP_S:
+            return
+        d = (angle - prev[0] + 180) % 360 - 180
+        if abs(d) > SPIN_JUMP_DEG:
+            for _ in range(min(2, int(round(abs(d) / 90)))):
+                _, perm, rename = _SPIN[1 if d > 0 else -1]
+                self._turn_whole(perm, rename)
+            self._count('spun')
 
     def _count(self, what):
         self.counts[what] = self.counts.get(what, 0) + 1
 
     def position_hint(self):
-        """How to hold the cube, in its own colours (the centres never move)."""
-        c = self.face_colors
-        if not all(c.get(f) for f in 'UFR'):
-            return 'Hold it in the first position: Top, Front and Right toward the camera.'
-        return f"Hold it with {c['U']} on top, {c['F']} facing you and {c['R']} on the right."
+        """How to hold the cube: any way round (the tracking finds which)."""
+        return HOLD_MESSAGE
 
     def home_message(self):
-        return 'Turn the cube back to the first position. ' + self.position_hint()
+        return self.position_hint()
 
     def _plan_move(self):
         return self.plan[self.step] if self.step < len(self.plan) else None
@@ -271,7 +323,10 @@ class TrackSession:
                 'fix': list(self.fixing) if self.fixing and not self.off else None,
                 'step': self.step + 1, 'total': len(self.plan), 'move': expected,
                 'steady': self._steady_progress(), 'needed': 10, 'event': event, 'message': message,
-                'state': ''.join(self.letters), 'face_colors': self.face_colors}
+                'state': ''.join(self.letters), 'face_colors': self.face_colors,
+                'sides': self.sides, 'hold_unsure': self.hold_unsure,
+                # the move's layer can't be seen from here (the back side, held face-on): show more of the cube
+                'move_hidden': bool(expected) and all(OPPOSITE[x] == expected[0] for x in self.sides)}
 
     def skip(self):
         """The user says they did the shown move (fallback if tracking struggles)."""
@@ -308,10 +363,15 @@ class TrackSession:
             self._count('hands turning')
             self._buffer, self._last_kpts, self._lost_since = [], None, None
             return self.status()
-        if not (kpts and frame_result.get('confident') and faces and all(None not in faces[f] for f in 'UFR')):
+        seen = sides_seen(faces) if faces else ''
+        if not (kpts and frame_result.get('confident') and seen):
             self._count('no cube')
             self._buffer, self._last_kpts = [], None
             return self._maybe_lost(now)
+        if seen != self.sides:  # held another way (e.g. from corner-on to face-on): a fresh look
+            self.sides = seen
+            self._buffer, self._last_kpts = [], None
+        self._follow_spin(kpts, seen, now)
         k = np.asarray(kpts, float)
         size = np.mean(np.linalg.norm(k[1:] - k[0], axis=1))
         gap = min(3.0, max(1.0, (now - self._last_time) / FRAME_GAP)) if self._last_time is not None else 1.0
@@ -324,7 +384,7 @@ class TrackSession:
         self._last_kpts = k
         covered = frame_result.get('covered')
         self._buffer.append((reading_features(faces),
-                             np.array([not (covered and covered[f][i]) for f in 'UFR' for i in range(9)])))
+                             np.array([f in seen and not (covered and covered[f][i]) for f in 'UFR' for i in range(9)])))
         if len(self._buffer) < STEADY_FRAMES or now - self._steady_since < STEADY_SECONDS - 1e-6:
             return self.status()
         feats = np.array([f for f, _ in self._buffer])                   # (frames, 27, 3)
@@ -337,7 +397,24 @@ class TrackSession:
         info = {}
         verdict, moves, new_letters = decide(self.letters, obs, self.refs, expected, visible, info)
         reoriented = False
-        if not (verdict == 'ok' and len(moves) <= 1 and info.get('per_sticker', 99) < WELL_FITTING):
+        if self.sides == 'F' and verdict == 'ok' and moves and all(mv[0] == 'F' for mv in moves) and moves != (expected,):
+            # Face-on, the front side turned (when that wasn't asked for) looks just like the whole cube
+            # turned in the hand (what people do far more often): take it as that.
+            q = sum(_quarter_turns(mv) for mv in moves) % 4      # F: clockwise as the camera sees it
+            for _ in range({1: 1, 2: 2, 3: 1}[q]):
+                _, perm, rename = _SPIN[-1 if q in (1, 2) else 1]
+                self._turn_whole(perm, rename)
+            self._count('spun')
+            reoriented = True
+            expected = self._expected()
+            info = {}
+            verdict, moves, new_letters = decide(self.letters, obs, self.refs, expected, visible, info)
+        if verdict == 'ok' and len(self.sides) >= 2:
+            self.hold_unsure = False   # two sides seen: which way round it is held is clear
+        # ('unsure' with a good fit: two moves look alike from here, e.g. one on a side not seen; the
+        # cube is still held the same way)
+        if not reoriented and not (verdict in ('ok', 'unsure') and len(moves) <= 1
+                                   and info.get('per_sticker', 99) < WELL_FITTING):
             # Nothing explains it well: maybe the cube is just held another way round.
             if self._reorient(obs, visible, info.get('per_sticker', 99)):
                 reoriented = True

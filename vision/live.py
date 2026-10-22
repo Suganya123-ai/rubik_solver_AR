@@ -8,7 +8,7 @@ from datetime import datetime
 import cv2
 import numpy as np
 
-from .detector import get_detector
+from .detector import complete, get_detector
 from .hands import covered_stickers, get_hand_tracker
 from .reader import read_three_faces
 
@@ -45,15 +45,17 @@ def process_frame(jpeg_bytes):
     h, w = frame.shape[:2]
     tracker = get_hand_tracker()
     hands_job = _hand_pool.submit(tracker.detect, frame) if tracker else None
-    found = get_detector().detect(frame)
+    found = get_detector().detect_hold(frame)
     hands = hands_job.result() if hands_job else []
     result = {'type': 'frame', 'width': w, 'height': h, 'keypoints': None, 'confidence': None, 'faces': None,
-              'confident': False, 'hands': hands, 'covered': None}
+              'confident': False, 'hands': hands, 'covered': None, 'hold': None, 'seen': None}
     if found is not None:
-        kpts, confidence = found
+        kpts, confidence, hold = found
         faces = read_three_faces(frame, kpts)
-        result.update(keypoints=kpts.round(1).tolist(), confidence=round(confidence, 3),
-                      faces=faces, confident=confidence >= CONFIDENT,
+        # keypoints: all 7, the hidden ones estimated (for drawing); seen: which ones the camera really sees
+        result.update(keypoints=complete(kpts, hold).round(1).tolist(), confidence=round(confidence, 3),
+                      faces=faces, confident=confidence >= CONFIDENT, hold=hold,
+                      seen=[not np.isnan(p).any() for p in kpts],
                       covered=covered_stickers(kpts, hands, frame, faces))
     result['ms'] = round((time.perf_counter() - t0) * 1000, 1)
     return result

@@ -10,7 +10,7 @@ declare global {
       homePitch: number;
     };
     drawMoveOnVideo(ctx: CanvasRenderingContext2D, keypoints: [number, number][], move: string,
-                    opts?: { undo?: boolean; now?: number }): void;
+                    opts?: { undo?: boolean; now?: number; seen?: boolean[] | null }): void;
   }
 }
 export {};

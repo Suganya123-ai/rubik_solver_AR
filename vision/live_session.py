@@ -103,7 +103,9 @@ class LiveClient:
             raise ProtocolError(f'frame larger than {MAX_FRAME_BYTES // 1_000_000} MB')
         frame_id, jpeg = int.from_bytes(data[:4], 'big'), data[4:]
         result = process_frame(jpeg)  # raises ValueError on a bad image
-        self.last_jpeg, self.last_keypoints = jpeg, result.get('keypoints')
+        # (a pre-label for a saved frame only when all 7 corners were seen: the others are estimates)
+        self.last_jpeg = jpeg
+        self.last_keypoints = result.get('keypoints') if result.get('hold') in (None, 'corner') else None
         result['hands_busy'] = self.busy.update(result['hands'], result['keypoints'], time.monotonic())
         self._note(result)
         if self.scan is not None:

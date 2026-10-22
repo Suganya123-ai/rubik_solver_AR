@@ -86,7 +86,9 @@ class ScanSession:
         kpts, faces = frame_result.get('keypoints'), frame_result.get('faces')
         # (Hands turning the cube aren't checked here: the cube's corners must be
         # still for a capture anyway, and a false "turning" blocked captures.)
-        if not (kpts and frame_result.get('confident') and faces and all(None not in faces[f] for f in 'UFR')):
+        # (The scan needs three sides at once: a cube held edge- or face-on has a side None.)
+        if not (kpts and frame_result.get('confident') and faces and
+                all(faces[f] is not None and None not in faces[f] for f in 'UFR')):
             self._reset_steady()
             return {**self.status(), 'event': None}
         k = np.asarray(kpts, float)
