@@ -5,7 +5,8 @@
 import type { FrameReply } from './serverLink';
 
 export type Pt = [number, number];
-const EASE = 0.45;          // per animation frame
+const EASE = 0.3;           // per animation frame (lower: steadier, a little more lag)
+const HOLD_SWITCH = 3;      // replies in a row showing another hold before the overlays switch to it
 const FORGET_MS = 600;      // no cube for this long: overlays fade out
 
 export class CubeView {
@@ -19,6 +20,8 @@ export class CubeView {
   seen: boolean[] | null = null;
   lastSeen = -Infinity;
   private target: Pt[] | null = null;
+  private nextSeen: string | null = null;     // a different hold seen lately, and how many replies in a row
+  private nextCount = 0;
 
   update(reply: FrameReply, now: number): void {
     this.frameW = reply.width;
@@ -26,11 +29,21 @@ export class CubeView {
     this.confident = reply.confident;
     if (reply.keypoints) {
       this.target = reply.keypoints;
-      this.hold = reply.hold ?? null;
-      this.seen = reply.seen ?? null;
+      this.switchHold(reply.hold ?? null, reply.seen ?? null);
       this.lastSeen = now;
       if (!this.keypoints) this.keypoints = reply.keypoints.map((p) => [p[0], p[1]] as Pt);
     }
+  }
+
+  /** The model can flicker between two holds (face-on / edge-on) when the cube is in between; each
+   *  switch changes how the arrows are fitted, so the overlays only follow a hold that stays. */
+  private switchHold(hold: string | null, seen: boolean[] | null): void {
+    const key = seen ? seen.map((v) => (v ? 1 : 0)).join('') : '';
+    const now = this.seen ? this.seen.map((v) => (v ? 1 : 0)).join('') : '';
+    if (key === now || this.hold === null) { this.hold = hold; this.seen = seen; this.nextSeen = null; return; }
+    this.nextCount = key === this.nextSeen ? this.nextCount + 1 : 1;
+    this.nextSeen = key;
+    if (this.nextCount >= HOLD_SWITCH) { this.hold = hold; this.seen = seen; this.nextSeen = null; }
   }
 
   /** Call every animation frame. Returns how visible the overlays should be (0..1). */

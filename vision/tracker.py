@@ -135,6 +135,7 @@ def sides_seen(reading):
 
 
 MIN_VISIBLE = 9   # fewer stickers than this in view (one side; hands over the rest): don't judge
+MIN_EVIDENCE = 3  # stickers in view a move must change before it is called a mistake (a side move face-on: 3)
 OPPOSITE = {'U': 'D', 'D': 'U', 'F': 'B', 'B': 'F', 'R': 'L', 'L': 'R'}
 HOLD_TIE = 1.5    # ways of holding the cube that fit within this (per sticker) of the best look the same
 
@@ -221,6 +222,7 @@ class TrackSession:
         self.sides = 'UFR'             # the sides seen in the last frame (U, F, R named from the camera)
         self.hold_unsure = False       # the cube shows too little to tell which way round it is held
         self._face_angle = None        # (angle of the front's top edge, time), held face-on (_follow_spin)
+        self._pending = None           # a mistake seen once, reported if the next look agrees
 
     @property
     def solved(self):
@@ -443,6 +445,19 @@ class TrackSession:
         self._lost_reported = False
         if verdict == 'unsure':
             return self.status('unsure')
+        if moves and moves != (expected,):
+            # Not the move asked for: a mistake is only reported when it changed enough of what the camera
+            # sees (fewer than a row of stickers: a glint or a finger
+            # could fake that) and the next look agrees (the hold stays still a moment longer).
+            changed = int((visible & (self.letters[_VISIBLE] != np.asarray(new_letters)[_VISIBLE])).sum())
+            if changed < MIN_EVIDENCE:
+                self._pending = None
+                return self.status('unsure')
+            if self._pending != moves:
+                self._pending = moves
+                self._count('mistake to confirm')
+                return self.status()
+        self._pending = None
         self._recalibrate(obs, new_letters, visible)
         if moves == ():
             return self.status('reoriented', 'Following the cube the way you are holding it now.') if reoriented \

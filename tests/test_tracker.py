@@ -33,8 +33,9 @@ def _frame(letters, noise=0.0, rng=None):
 CLOCK = [0.0]
 
 
-def _hold(session, letters, frames=STEADY_FRAMES, **kw):
-    """Holds the cube still for `frames` frames of a 10 fps camera."""
+def _hold(session, letters, frames=2 * STEADY_FRAMES, **kw):
+    """Holds the cube still for `frames` frames of a 10 fps camera (two looks: a mistake is
+    reported once a second look agrees)."""
     out = None
     for _ in range(frames):
         CLOCK[0] += 0.1
@@ -303,7 +304,7 @@ def _view_frame(phys, sides):
     return fr
 
 
-def _hold_view(session, phys, sides, frames=STEADY_FRAMES):
+def _hold_view(session, phys, sides, frames=2 * STEADY_FRAMES):
     out = None
     for _ in range(frames):
         CLOCK[0] += 0.1
@@ -406,3 +407,22 @@ def test_a_wrong_move_seen_face_on_is_caught():
     phys = apply_moves(state, [wrong]).arr
     st = _hold_view(s, phys, 'F')
     assert st['event'] == 'wrong' and wrong in st['message']
+
+
+def test_a_one_look_glitch_is_not_a_mistake():
+    """A glint or a finger making the 3 back-row stickers look like a back-side turn for one look
+    (the cube not turned): no mistake reported, and the plan carries on."""
+    state = _scrambled(14)
+    s = _session(state)
+    assert _hold(s, s.letters)['event'] == 'home'
+    expected = s.plan[0]
+    fake = next(m for m in ('B', "B'", 'B2') if m != expected)
+    glitch = apply_moves(state, [fake]).arr
+    events = []
+    for letters in (glitch, state.arr, state.arr):
+        for _ in range(STEADY_FRAMES):
+            CLOCK[0] += 0.1
+            events.append(s.feed(_view_frame(letters, 'UF'), now=CLOCK[0]).get('event'))
+    assert 'wrong' not in events and s.step == 0 and not s.off
+    after = apply_moves(state, [expected]).arr
+    assert _hold_view(s, after, 'UF')['event'] == 'correct'
