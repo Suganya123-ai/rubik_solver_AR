@@ -57,8 +57,9 @@ move. Wrong: it says how to undo it, then the same plan carries on; after severa
 - Voice: it says every step; the person can say next (the move is done but the camera missed it), repeat, \
 scan, solve, new plan, stop, quiet, speak, help, or ask a question like this one.
 - Holding while solving: any way round (a corner, an edge or one side toward the camera); the tutor follows the \
-cube when it is turned to show other sides. Two or three sides showing works best; with one side showing, a move \
-of the side facing the person can't be seen, so the tutor asks them to tilt the cube. Fingers should stay off the \
+cube when it is turned to show other sides. Before each move it checks the hold shows that move (at least two \
+sides, including the side to turn or two sides its layer crosses; corner-on always works): if not, it asks the \
+person to turn the cube to show that side first, and only then shows the arrow and checks the move. Fingers should stay off the \
 stickers when holding still. (The scan still needs three sides at once.)"""
 
 REPORT = """Write a short report of this solving session for the person who just solved the cube: two or three \

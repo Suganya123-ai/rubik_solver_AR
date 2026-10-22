@@ -24,9 +24,24 @@ export type Track = { phase: string; step: number; total: number; move: string |
   fix?: [string, string] | null;
   /** The cube held any way round: the sides the camera sees (of U, F, R, named from the camera), whether
    *  it shows too little to tell which way round it is, and whether the move's side can't be seen. */
-  sides?: string; hold_unsure?: boolean; move_hidden?: boolean };
+  sides?: string; hold_unsure?: boolean; move_hidden?: boolean;
+  /** The hold shows the move well enough to check it; false: ask for another hold before showing the move. */
+  hold_ok?: boolean };
 
 const ANY_HOLD = 'Any way round: a corner, an edge or one side toward the camera. Two or three sides showing works best.';
+
+/** How to hold the cube so the camera can see the next move: [title, text]. */
+function holdAdvice(t: Track): [string, string] {
+  const x = (t.move ?? ' ')[0];
+  const then = "Then I'll show the move.";
+  if ((t.sides ?? '').length < 2 && (t.sides ?? '').includes(x)) {
+    return ['Tilt the cube a little', `So the camera sees two sides -- a corner toward the camera is best. ${then}`];
+  }
+  const colour = t.face_colors[x] ?? x;
+  return [`Show the camera the ${colour} side`,
+    `It's ${POSITION[x] ?? 'out of view'} now. Turn the cube so the camera sees it and one more side -- ` +
+    `a corner toward the camera is best. ${then}`];
+}
 
 /** A line to add when the camera can't follow the move from how the cube is held. */
 function holdTip(t: Track): string {
@@ -389,6 +404,20 @@ export class Flow {
     }
     const m = moveWords(t.move ?? '', t.face_colors);
     const chip = `<i style="background:${SWATCH[m.colour] ?? '#888'}"></i>`;
+    if (t.hold_ok === false && t.event !== 'wrong') {
+      // Held so the move can't be checked well (face-on, or its side out of view): the hold first, then the arrow.
+      this.guide = null;
+      this.el.popup.hidden = true;
+      const [title, text] = holdAdvice(t);
+      const done = t.event === 'correct' || t.event === 'undone';
+      if (done) this.holdUntil = now + 1200;
+      if (done || now > this.holdUntil) {
+        const label = done ? (t.event === 'undone' ? '✓ Undone -- back on track' : '✓ Correct -- next move')
+          : undoing ? 'Undo the mistake' : `Move ${t.step} of ${t.total}`;
+        this.card(label, chip, title, text, buttons, done ? 'good' : undoing ? 'bad' : '');
+      }
+      return;
+    }
     if (undoing && t.fix) {
       // The right side, the wrong amount: one turn of that side puts it back on the plan (no undo, no redo).
       const [did, asked] = t.fix;

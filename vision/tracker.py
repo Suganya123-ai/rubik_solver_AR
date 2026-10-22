@@ -137,6 +137,19 @@ def sides_seen(reading):
 MIN_VISIBLE = 9   # fewer stickers than this in view (one side; hands over the rest): don't judge
 MIN_EVIDENCE = 3  # stickers in view a move must change before it is called a mistake (a side move face-on: 3)
 OPPOSITE = {'U': 'D', 'D': 'U', 'F': 'B', 'B': 'F', 'R': 'L', 'L': 'R'}
+
+
+def hold_shows(move, sides):
+    """Whether the cube held showing `sides` (of U, F, R, named from the camera) shows `move` well
+    enough to check it: at least two sides seen, and the turning side one of them or its layer running
+    across two of them. Corner-on shows every move; face-on none (a top or bottom turn changes one
+    row, the back side is hidden, and a front turn looks like the cube turned in the hand)."""
+    if not move or len(sides) < 2:
+        return False
+    x = move[0]
+    return x in sides or sum(1 for side in sides if OPPOSITE[side] != x) >= 2
+
+
 HOLD_TIE = 1.5    # ways of holding the cube that fit within this (per sticker) of the best look the same
 
 
@@ -328,7 +341,9 @@ class TrackSession:
                 'state': ''.join(self.letters), 'face_colors': self.face_colors,
                 'sides': self.sides, 'hold_unsure': self.hold_unsure,
                 # the move's layer can't be seen from here (the back side, held face-on): show more of the cube
-                'move_hidden': bool(expected) and all(OPPOSITE[x] == expected[0] for x in self.sides)}
+                'move_hidden': bool(expected) and all(OPPOSITE[x] == expected[0] for x in self.sides),
+                # the hold shows the move well enough to check it; if not, the tutor asks for another hold first
+                'hold_ok': hold_shows(expected, self.sides)}
 
     def skip(self):
         """The user says they did the shown move (fallback if tracking struggles)."""
@@ -445,6 +460,11 @@ class TrackSession:
         self._lost_reported = False
         if verdict == 'unsure':
             return self.status('unsure')
+        if moves and not hold_shows(expected, self.sides):
+            # Held so the move can't be checked well (the tutor asks for a better hold first): no
+            # judgement; a move made anyway is seen once the cube is held so it shows.
+            self._count('hold not good for the move')
+            return self.status()
         if moves and moves != (expected,):
             # Not the move asked for: a mistake is only reported when it changed enough of what the camera
             # sees (fewer than a row of stickers: a glint or a finger

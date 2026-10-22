@@ -366,9 +366,8 @@ def test_follows_the_cube_held_any_way_round():
                 phys = _turn(phys, turn)
             _hold_view(s, phys, sides, STEADY_FRAMES * 2)
         steps += 1
-        if s.status()['move_hidden']:  # the back side, held face-on: as the tutor asks, show the top too
-            assert sides == 'F' and s.plan[s.step][0] == 'B'
-            sides = 'UF'
+        if not s.status()['hold_ok']:  # as the tutor asks: hold it so the move shows (here corner-on)
+            sides = 'UFR'
         move = s.plan[s.step]
         phys = apply_moves(CubeState(phys), [move]).arr
         st = _hold_view(s, phys, sides, STEADY_FRAMES * 2)
@@ -388,17 +387,17 @@ def test_turning_the_front_is_not_taken_for_turning_the_cube():
     assert s.counts.get('spun') == 1
     move = s.plan[s.step]
     phys = apply_moves(CubeState(phys), [move]).arr
-    for _ in range(STEADY_FRAMES * 2):
+    for _ in range(STEADY_FRAMES * 2):     # the move made face-on: not judged there...
         CLOCK[0] += 0.1
         fr = _view_frame(phys, 'F')
         fr['keypoints'] = FACE_ON.tolist()
-        st = s.feed(fr, now=CLOCK[0])
-        if st.get('event'):
-            break
-    assert st['event'] == 'correct', st
+        assert s.feed(fr, now=CLOCK[0]).get('event') in (None, 'unsure')
+    assert _hold_view(s, phys, 'UFR')['event'] == 'correct'   # ...but once the cube shows it
 
 
-def test_a_wrong_move_seen_face_on_is_caught():
+def test_held_face_on_the_tutor_asks_for_another_hold_and_judges_nothing():
+    """Face-on no move can be checked well: the tutor asks for another hold and judges nothing;
+    a mistake made meanwhile is caught once the cube shows two or three sides."""
     state = _scrambled(12)
     s = _session(state)
     assert _hold(s, s.letters)['event'] == 'home'
@@ -406,7 +405,9 @@ def test_a_wrong_move_seen_face_on_is_caught():
     wrong = next(m for m in ALL_MOVES if m[0] not in (expected[0], 'B'))
     phys = apply_moves(state, [wrong]).arr
     st = _hold_view(s, phys, 'F')
-    assert st['event'] == 'wrong' and wrong in st['message']
+    assert st['event'] is None and not st['hold_ok'] and s.step == 0
+    st = _hold_view(s, phys, 'UFR')
+    assert st['hold_ok'] and st['event'] == 'wrong' and wrong in st['message']
 
 
 def test_a_one_look_glitch_is_not_a_mistake():
@@ -426,3 +427,11 @@ def test_a_one_look_glitch_is_not_a_mistake():
     assert 'wrong' not in events and s.step == 0 and not s.off
     after = apply_moves(state, [expected]).arr
     assert _hold_view(s, after, 'UF')['event'] == 'correct'
+
+
+def test_which_holds_show_which_moves():
+    from vision.tracker import hold_shows
+    assert all(hold_shows(m, 'UFR') for m in ALL_MOVES)                     # corner-on: every move
+    assert not any(hold_shows(m, 'F') for m in ALL_MOVES)                   # face-on: none
+    assert {m[0] for m in ALL_MOVES if hold_shows(m, 'UF')} == set('UFLR')  # not the bottom or back
+    assert {m[0] for m in ALL_MOVES if hold_shows(m, 'FR')} == set('FRUD')  # not the left or back
