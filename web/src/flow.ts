@@ -453,6 +453,11 @@ export class Flow {
       this.card('Got it', chip, m.title, `Following the cube the way you're holding it. ${m.how}${holdTip(t)}`, buttons, 'good');
       return;
     }
+    if (t.event === 'resynced') {
+      this.holdUntil = now + 2500;
+      this.card('Found you again', chip, m.title, `${t.message ?? ''} ${m.how}`, buttons, 'good');
+      return;
+    }
     if (t.event === 'correct' || t.event === 'undone' || t.event === 'replanned') {
       this.holdUntil = now + 1200;
       this.card(t.event === 'undone' ? '✓ Undone -- back on track' : t.event === 'replanned' ? 'New plan' : '✓ Correct',

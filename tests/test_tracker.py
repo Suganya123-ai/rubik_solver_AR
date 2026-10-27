@@ -435,3 +435,36 @@ def test_which_holds_show_which_moves():
     assert not any(hold_shows(m, 'F') for m in ALL_MOVES)                   # face-on: none
     assert {m[0] for m in ALL_MOVES if hold_shows(m, 'UF')} == set('UFLR')  # not the bottom or back
     assert {m[0] for m in ALL_MOVES if hold_shows(m, 'FR')} == set('FRUD')  # not the left or back
+
+
+def test_lost_after_missed_moves_finds_the_step_again():
+    """Three moves done while the camera wasn't looking (more than it can explain from where it was):
+    it finds the step along the plan and carries on, even with the cube held another way round."""
+    state = _scrambled(21)
+    s = _session(state)
+    assert _hold(s, s.letters)['event'] == 'home'
+    cube = apply_moves(state, s.plan[:3])
+    phys = _turn(cube.arr, _quarter(1))
+    st = _hold_view(s, phys, 'UFR')
+    assert st['event'] == 'resynced' and s.step == 3, st
+    cube = apply_moves(CubeState(phys), [s.plan[3]])
+    assert _hold_view(s, cube.arr, 'UFR')['event'] == 'correct'
+
+
+def test_solved_while_lost_is_seen():
+    """The rest of the plan done out of the camera's sight: the finished cube is recognised."""
+    state = _scrambled(22)
+    s = _session(state)
+    assert _hold(s, s.letters)['event'] == 'home'
+    done = apply_moves(state, s.plan)
+    st = _hold_view(s, _turn(done.arr, _quarter(0)), 'UFR')
+    assert st['event'] == 'solved' and s.solved
+
+
+def test_solved_by_another_route_is_seen():
+    """Solved some other way (not the plan's moves): three sides each one colour is solved."""
+    state = _scrambled(23)
+    s = _session(state)
+    assert _hold(s, s.letters)['event'] == 'home'
+    st = _hold_view(s, solved_state().arr, 'UFR')
+    assert st['event'] == 'solved'

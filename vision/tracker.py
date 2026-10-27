@@ -271,6 +271,91 @@ class TrackSession:
         self._count('reoriented')
         return True
 
+    def _plan_ahead(self, letters, most=4):
+        """How many of the plan's next moves (2 up to `most`) lead to `letters`, or 0."""
+        cube = CubeState(np.asarray(self.letters).copy())
+        target = ''.join(letters)
+        for n in range(1, min(most, len(self.plan) - self.step) + 1):
+            cube = apply_moves(cube, [self.plan[self.step + n - 1]])
+            if n >= 2 and ''.join(cube.arr) == target:
+                return n
+        return 0
+
+    def _looks_solved(self, obs, visible):
+        """Three sides seen, each all one colour (each sticker's nearest colour that of its side's centre),
+        and the three colours different: the cube is solved, whatever the tracking thought."""
+        if self.sides != 'UFR' or visible.sum() < 24:
+            return False
+        letters = list(self.refs)
+        ref = np.array([self.refs[x] for x in letters])
+        nearest = np.array([letters[int(np.argmin(np.linalg.norm(ref - o, axis=1)))] for o in obs])
+        centres = [nearest[9 * n + 4] for n in range(3)]
+        if len(set(centres)) < 3:
+            return False
+        return all(nearest[i] == centres[i // 9] for i in range(27) if visible[i])
+
+    def _resync(self, obs, visible, beat=None, ahead_only=False, exact_only=False):
+        """Finds where the cube is when the tracking lost it: every position along the plan (each step
+        before and after the current one, up to two moves off it), held any of the 24 ways. If one fits
+        well and clearly better than any other step, the tutor carries on from there (or says solved)."""
+        if len(self.sides) < 2 or visible.sum() < 15:
+            return None              # one side: several steps can look alike from here
+        base = self._resume_letters if self.off and self._resume_letters is not None else self.letters
+        base = np.asarray(base)
+        plan = self.plan
+        states = {self.step: base}
+        cube = CubeState(base.copy())
+        for k in range(self.step, len(plan)):                      # ahead: the plan's moves done
+            cube = apply_moves(cube, [plan[k]])
+            states[k + 1] = cube.arr.copy()
+        cube = CubeState(base.copy())
+        for k in range(self.step - 1, -1, -1):                     # behind: undone
+            cube = apply_moves(cube, [inverse(plan[k])])
+            states[k] = cube.arr.copy()
+        fits = []
+        if ahead_only:     # (what looks like a mistake: only steps ahead, reached exactly, can explain it)
+            states = {k: v for k, v in states.items() if k > self.step}
+        for k, letters0 in states.items():
+            for m, perm, rename in _TURNS:
+                letters = np.array([rename[x] for x in letters0[perm]])
+                refs = {rename[x]: v for x, v in self.refs.items()}
+                info = {}
+                verdict, moves, new = decide(letters, obs, refs, None, visible, info)
+                if verdict in ('ok', 'unsure') and info['per_sticker'] < WELL_FITTING and not ((ahead_only or exact_only) and moves):
+                    fits.append((info['per_sticker'] + 2.0 * len(moves), k, moves, new, perm, rename, verdict))
+        self._count('resync tried')
+        if not fits:
+            return None
+        fits.sort(key=lambda f: f[0])
+        best = fits[0]
+        # (a neighbouring step plus a move can reach the same position held the same way: not a rival)
+        same = lambda f: np.array_equal(f[3], best[3]) and np.array_equal(f[4], best[4])
+        rival = next((f for f in fits[1:] if not same(f)), None)
+        if best[6] != 'ok' or (rival and rival[0] - best[0] < 3.0):
+            return None                                           # two steps fit about as well: don't guess
+        if beat is not None and best[0] > beat - 1.0:
+            return None                                           # no better than what was seen as a mistake
+        _, k, moves, new, perm, rename, _ = best
+        # the cube held that way round, at plan step k
+        start = self.step
+        self.step = k
+        self.off, self._resume_letters, self.fixing = [], None, None
+        self._turn_whole(perm, rename)          # (renames the plan too; the state is replaced below)
+        self.letters = np.asarray(new)
+        self.home_ok = True
+        self._lost_since, self._lost_reported = None, False
+        self._count('resynced')
+        if self.solved:
+            self.step = len(self.plan)
+            return self.status('solved', 'Solved!')
+        if moves:                                # a couple of other moves on top: a fresh plan from here
+            self.plan = self.solve(CubeState(self.letters))
+            self.step = 0
+            return self.status('replanned', f'Found the cube again. New plan from here: {len(self.plan)} moves.')
+        if k == start:
+            return self.status('reoriented', 'Following the cube the way you are holding it now.')
+        return self.status('resynced', f'Found where you are: move {self.step + 1} of {len(self.plan)}.')
+
     def _turn_whole(self, perm, rename):
         """The cube is now held turned (one of _TURNS): rename the state, colours, plan and undo list."""
         self.letters = np.array([rename[x] for x in self.letters[perm]])
@@ -432,7 +517,13 @@ class TrackSession:
         # cube is still held the same way)
         if not reoriented and not (verdict in ('ok', 'unsure') and len(moves) <= 1
                                    and info.get('per_sticker', 99) < WELL_FITTING):
-            # Nothing explains it well: maybe the cube is just held another way round.
+            # Nothing explains it well: maybe the cube is held another way round, maybe moves were missed
+            # too: look along the plan, any way round (exact steps only: one move on top is judged below).
+            if self.home_ok and not self.off:
+                found = self._resync(obs, visible, beat=info.get('per_sticker', 99), exact_only=True)
+                if found:
+                    self._pending = None
+                    return found
             if self._reorient(obs, visible, info.get('per_sticker', 99)):
                 reoriented = True
                 expected = self._expected()
@@ -454,8 +545,23 @@ class TrackSession:
             if reoriented:  # (it fits another way round, but not yet without a move: keep waiting)
                 return self.status('reoriented', 'Following the cube the way you are holding it now.')
             return self._maybe_lost(now, self.home_message())
-        if verdict == 'lost':
-            return self._maybe_lost(now)
+        if self.home_ok and not (verdict == 'ok' and len(moves) <= 1) and self._looks_solved(obs, visible):
+            self.letters = np.array(solved_state().arr)       # (the centres decide the colours: solved is solved)
+            self.step, self.off, self._resume_letters, self.fixing = len(self.plan), [], None, None
+            self._count('looks solved')
+            return self.status('solved', 'Solved!')
+        if verdict == 'lost' or (verdict == 'unsure' and info.get('per_sticker', 99) > WELL_FITTING):
+            # Nothing near where the tracking thinks the cube is: a move was missed (or several). Look for
+            # the cube along the whole plan, held any way round, before calling it lost.
+            found = self._resync(obs, visible)
+            if found:
+                return found
+            if verdict == 'lost':
+                return self._maybe_lost(now)
+        elif verdict == 'unsure' and not self.off:     # (several moves done since the last look?)
+            found = self._resync(obs, visible, ahead_only=True)
+            if found:
+                return found
         self._lost_since = None
         self._lost_reported = False
         if verdict == 'unsure':
@@ -465,6 +571,25 @@ class TrackSession:
             # judgement; a move made anyway is seen once the cube is held so it shows.
             self._count('hold not good for the move')
             return self.status()
+        if moves and moves != (expected,) and not self.off:
+            ahead = self._plan_ahead(new_letters)
+            if ahead:
+                # Not one move but the plan's next few (some done while the camera wasn't watching): fine.
+                self._pending = None
+                self._recalibrate(obs, new_letters, visible)
+                self.history.append(moves)
+                self.letters = np.asarray(new_letters)
+                self.step += ahead
+                self.fixing = None
+                if self.solved:
+                    return self.status('solved', 'Solved!')
+                return self.status('correct', f'Got it -- you are at move {self.step + 1} of {len(self.plan)}.')
+        if moves and moves != (expected,) and not self.off:
+            # Before calling it a mistake: is the cube at another step of the plan (moves missed)?
+            found = self._resync(obs, visible, beat=info.get('per_sticker', 99) + 2.0 * len(moves), ahead_only=True)
+            if found:
+                self._pending = None
+                return found
         if moves and moves != (expected,):
             # Not the move asked for: a mistake is only reported when it changed enough of what the camera
             # sees (fewer than a row of stickers: a glint or a finger
