@@ -146,12 +146,36 @@ function note(text: string): void {     // a few seconds on screen
   noteTimer = window.setTimeout(() => hud.say(''), 4000);
 }
 
+// Camera settings on screen (bottom left), the same as the keys C, R, M and F.
+const camBar = document.createElement('div');
+camBar.id = 'cam-bar';
+document.body.appendChild(camBar);
+function camButtons(): void {
+  const items: [string, string, boolean | null][] = [
+    ['C', 'Next camera', null], ['M', 'Mirror', view.mirrored], ['R', 'Turn round', view.rotated], ['F', 'Zoom on cube', link.follow],
+  ];
+  camBar.innerHTML = '';
+  for (const [key, label, on] of items) {
+    const b = document.createElement('button');
+    b.textContent = on === null ? label : `${label}: ${on ? 'on' : 'off'}`;
+    b.title = `Key ${key}`;
+    if (on) b.classList.add('on');
+    b.addEventListener('click', (e) => {
+      (e.currentTarget as HTMLElement).blur();
+      dispatchEvent(new KeyboardEvent('keydown', { key: key.toLowerCase() }));
+    });
+    camBar.appendChild(b);
+  }
+}
+
 addEventListener('keydown', async (e) => {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  setTimeout(camButtons, 0);
   if (e.key === 'c' || e.key === 'C') {
     try {
       const name = await nextCamera(video);
       setMirror(/lumens/i.test(name));
+      camButtons();
       note(`Camera: ${name}`);
     } catch (err) { note(`Couldn't switch camera: ${(err as Error).message}`); }
   } else if (e.key === 'm' || e.key === 'M') {
@@ -174,7 +198,8 @@ async function boot(): Promise<void> {
   try {
     const name = await startCamera(video);
     setMirror(/lumens/i.test(name));
-    note(`Camera: ${name}. C: next camera, R: turn round, M: mirror, F: zoom on the cube.`);
+    camButtons();
+    note(`Camera: ${name}`);
   } catch (e) {
     hud.say(`Couldn't open the camera: ${(e as Error).message}`);
     return;
