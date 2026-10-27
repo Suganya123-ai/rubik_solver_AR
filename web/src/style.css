@@ -143,3 +143,15 @@ html, body { margin: 0; height: 100%; background: #000; color: var(--ink); overf
   border: 1px solid rgba(120, 200, 255, 0.35); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
 #cam-bar button.on { border-color: #3dff9a; color: #3dff9a; }
 #cam-bar button:hover { background: rgba(20, 40, 60, 0.85); }
+
+/* Camera chooser (camera.ts) */
+#cam-choose { position: fixed; inset: 0; z-index: 50; background: rgba(4, 10, 16, 0.92); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px; padding: 16px; font-family: Inter, system-ui, sans-serif; color: #e8f6ff; }
+.cam-choose-title { font-size: 18px; font-weight: 700; }
+.cam-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; width: min(1000px, 100%); }
+.cam-tile { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: #0d1a26; color: inherit; font: inherit;
+  font-size: 13px; border: 2px solid #23415a; border-radius: 10px; cursor: pointer; text-align: left; }
+.cam-tile:hover { border-color: #3dff9a; }
+.cam-tile.current { border-color: #6cc7ff; }
+.cam-tile video { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #000; border-radius: 6px; }
+.cam-close { padding: 8px 18px; border-radius: 8px; border: 1px solid #6cc7ff; background: transparent; color: #e8f6ff; cursor: pointer; }

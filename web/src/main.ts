@@ -5,7 +5,7 @@
 
 import './style.css';
 import { AppState } from './appState';
-import { nextCamera, startCamera } from './camera';
+import { chooseCamera, startCamera } from './camera';
 import { CubeView } from './cubeView';
 import { HandTracking } from './handTracking';
 import { Flow } from './flow';
@@ -152,7 +152,7 @@ camBar.id = 'cam-bar';
 document.body.appendChild(camBar);
 function camButtons(): void {
   const items: [string, string, boolean | null][] = [
-    ['C', 'Next camera', null], ['M', 'Mirror', view.mirrored], ['R', 'Turn round', view.rotated], ['F', 'Zoom on cube', link.follow],
+    ['C', 'Choose camera', null], ['M', 'Mirror', view.mirrored], ['R', 'Turn round', view.rotated], ['F', 'Zoom on cube', link.follow],
   ];
   camBar.innerHTML = '';
   for (const [key, label, on] of items) {
@@ -173,7 +173,8 @@ addEventListener('keydown', async (e) => {
   setTimeout(camButtons, 0);
   if (e.key === 'c' || e.key === 'C') {
     try {
-      const name = await nextCamera(video);
+      const name = await chooseCamera(video);
+      if (!name) return;
       setMirror(/lumens/i.test(name));
       camButtons();
       note(`Camera: ${name}`);
