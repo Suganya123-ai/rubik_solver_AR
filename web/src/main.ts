@@ -5,7 +5,7 @@
 
 import './style.css';
 import { AppState } from './appState';
-import { startCamera } from './camera';
+import { nextCamera, startCamera } from './camera';
 import { CubeView } from './cubeView';
 import { HandTracking } from './handTracking';
 import { Flow } from './flow';
@@ -117,12 +117,44 @@ function frame(now: number): void {
     ? 'Tilt the cube so you see three sides -- a corner pointing at the camera' : undefined);
 }
 
+// Mirroring: like a mirror for a camera facing the person (the laptop webcam); not for a camera
+// looking down at the table (the Living Lab's Lumens cameras). ?mirror=0/1 or the M key.
+function setMirror(fallback: boolean | null): void {
+  const q = new URLSearchParams(location.search).get('mirror');
+  view.mirrored = q !== null ? q !== '0' : fallback ?? true;
+  video.style.transform = view.mirrored ? 'scaleX(-1)' : 'none';
+}
+
+let noteTimer = 0;
+function note(text: string): void {     // a few seconds on screen
+  hud.say(text);
+  clearTimeout(noteTimer);
+  noteTimer = window.setTimeout(() => hud.say(''), 4000);
+}
+
+addEventListener('keydown', async (e) => {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  if (e.key === 'c' || e.key === 'C') {
+    try {
+      const name = await nextCamera(video);
+      setMirror(/lumens/i.test(name) ? false : true);
+      note(`Camera: ${name}`);
+    } catch (err) { note(`Couldn't switch camera: ${(err as Error).message}`); }
+  } else if (e.key === 'm' || e.key === 'M') {
+    view.mirrored = !view.mirrored;
+    video.style.transform = view.mirrored ? 'scaleX(-1)' : 'none';
+    note(view.mirrored ? 'Mirrored' : 'Not mirrored');
+  }
+});
+
 async function boot(): Promise<void> {
   resize();
   addEventListener('resize', resize);
   hud.say('Starting the camera…');
   try {
-    await startCamera(video);
+    const name = await startCamera(video);
+    setMirror(/lumens/i.test(name) ? false : null);
+    note(`Camera: ${name}. C: next camera, M: mirror on/off.`);
   } catch (e) {
     hud.say(`Couldn't open the camera: ${(e as Error).message}`);
     return;
@@ -134,7 +166,6 @@ async function boot(): Promise<void> {
     console.error(e);
     hud.say('Hand tracking unavailable in this browser; carrying on without it.');
   }
-  hud.say('');
   link.connect();  // (the flow already set the stage; the user may have pressed Start scan meanwhile)
   requestAnimationFrame(frame);
 }

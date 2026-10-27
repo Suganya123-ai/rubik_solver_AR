@@ -12,6 +12,8 @@ export class View {
   private ox = 0;
   private oy = 0;
   private vw = 1;
+  /** Shown like a mirror (a camera facing the person); off for a camera looking at the table. */
+  mirrored = true;
 
   update(videoW: number, videoH: number, screenW: number, screenH: number): void {
     this.w = screenW;
@@ -24,7 +26,7 @@ export class View {
 
   /** A point in video pixels -> screen (mirrored). */
   fromVideo([x, y]: Pt): Pt {
-    return [this.ox + (this.vw - x) * this.scale, this.oy + y * this.scale];
+    return [this.ox + (this.mirrored ? this.vw - x : x) * this.scale, this.oy + y * this.scale];
   }
 
   /** A MediaPipe point (0..1 of the video) -> screen. */
