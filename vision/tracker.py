@@ -135,6 +135,9 @@ def sides_seen(reading):
 
 
 MIN_VISIBLE = 9   # fewer stickers than this in view (one side; hands over the rest): don't judge
+ACCEPT_MAX = 15.0  # a move is accepted only when it fits at least this well (per sticker; good looks: 0-12)
+RESYNC_MAX = 15.0  # ...and a step found again after losing the cube
+CHECK_SOLVED = 'Nearly there? Hold the cube with a corner toward the camera so I can check it.'
 MIN_EVIDENCE = 3  # stickers in view a move must change before it is called a mistake (a side move face-on: 3)
 OPPOSITE = {'U': 'D', 'D': 'U', 'F': 'B', 'B': 'F', 'R': 'L', 'L': 'R'}
 
@@ -281,18 +284,25 @@ class TrackSession:
                 return n
         return 0
 
-    def _looks_solved(self, obs, visible):
-        """Three sides seen, each all one colour (each sticker's nearest colour that of its side's centre),
-        and the three colours different: the cube is solved, whatever the tracking thought."""
-        if self.sides != 'UFR' or visible.sum() < 24:
+    def _looks_solved(self, obs, visible, min_sides=3):
+        """At least `min_sides` sides seen, each all one colour (each sticker's nearest colour that of its
+        side's centre), the colours different: the cube looks solved. Three sides: solved, whatever the
+        tracking thought; two: enough to confirm a solve the tracking found."""
+        sides = [n for n, f in enumerate('UFR') if f in self.sides and visible[9 * n:9 * n + 9].sum() >= 6]
+        if len(sides) < min_sides:
             return False
         letters = list(self.refs)
         ref = np.array([self.refs[x] for x in letters])
         nearest = np.array([letters[int(np.argmin(np.linalg.norm(ref - o, axis=1)))] for o in obs])
-        centres = [nearest[9 * n + 4] for n in range(3)]
-        if len(set(centres)) < 3:
+        centres = [nearest[9 * n + 4] for n in sides]
+        if len(set(centres)) < len(sides):
             return False
-        return all(nearest[i] == centres[i // 9] for i in range(27) if visible[i])
+        return all(nearest[i] == nearest[9 * (i // 9) + 4] for n in sides for i in range(9 * n, 9 * n + 9) if visible[i])
+
+    def _solve_unconfirmed(self, letters, obs, visible):
+        """The tracking says solved, but the camera doesn't see a solved cube: don't believe it (a wrong
+        turn of the tracking, or colours misread). True if so."""
+        return ''.join(letters) == ''.join(solved_state().arr) and not self._looks_solved(obs, visible, 2)
 
     def _resync(self, obs, visible, beat=None, ahead_only=False, exact_only=False):
         """Finds where the cube is when the tracking lost it: every position along the plan (each step
@@ -321,7 +331,7 @@ class TrackSession:
                 refs = {rename[x]: v for x, v in self.refs.items()}
                 info = {}
                 verdict, moves, new = decide(letters, obs, refs, None, visible, info)
-                if verdict in ('ok', 'unsure') and info['per_sticker'] < WELL_FITTING and not ((ahead_only or exact_only) and moves):
+                if verdict in ('ok', 'unsure') and info['per_sticker'] < RESYNC_MAX and not ((ahead_only or exact_only) and moves):
                     fits.append((info['per_sticker'] + 2.0 * len(moves), k, moves, new, perm, rename, verdict))
         self._count('resync tried')
         if not fits:
@@ -336,6 +346,8 @@ class TrackSession:
         if beat is not None and best[0] > beat - 1.0:
             return None                                           # no better than what was seen as a mistake
         _, k, moves, new, perm, rename, _ = best
+        if self._solve_unconfirmed(new, obs, visible):
+            return None                                           # "solved" only when it looks solved
         # the cube held that way round, at plan step k
         start = self.step
         self.step = k
@@ -536,6 +548,15 @@ class TrackSession:
             self.on_judgement({**self.last_judgement, 'obs': np.round(obs, 1).tolist(),
                                'visible': visible.tolist(), 'state': ''.join(self.letters)})
 
+        if verdict == 'ok' and moves and info.get('per_sticker', 99) > ACCEPT_MAX:
+            verdict = 'unsure'           # a move that only roughly fits: wait for a clearer look
+            self._count('fit too rough to accept')
+        if verdict == 'ok' and moves and self._solve_unconfirmed(new_letters, obs, visible):
+            verdict = 'unsure'
+            self._count('solve not confirmed')
+            if not self.off:
+                self._pending = None
+                return self.status(None, CHECK_SOLVED)
         if not self.home_ok:
             if verdict == 'ok' and moves == ():
                 self.home_ok = True
@@ -573,6 +594,8 @@ class TrackSession:
             return self.status()
         if moves and moves != (expected,) and not self.off:
             ahead = self._plan_ahead(new_letters)
+            if ahead and (info.get('per_sticker', 99) > ACCEPT_MAX or self._solve_unconfirmed(new_letters, obs, visible)):
+                ahead = 0
             if ahead:
                 # Not one move but the plan's next few (some done while the camera wasn't watching): fine.
                 self._pending = None

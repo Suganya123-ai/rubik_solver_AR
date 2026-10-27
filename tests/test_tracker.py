@@ -468,3 +468,27 @@ def test_solved_by_another_route_is_seen():
     assert _hold(s, s.letters)['event'] == 'home'
     st = _hold_view(s, solved_state().arr, 'UFR')
     assert st['event'] == 'solved'
+
+
+def test_solved_is_only_said_when_the_cube_looks_solved():
+    """The tracking ends on 'solved' but the camera sees a sticker that doesn't match (the tracking
+    went wrong, or a colour was misread): no 'Solved!'; it asks to check. Once the cube really
+    looks solved, it says so."""
+    state = _scrambled(24)
+    s = _session(state)
+    assert _hold(s, s.letters)['event'] == 'home'
+    cube = state
+    for m in s.plan[:-1]:
+        cube = apply_moves(cube, [m])
+        assert _hold(s, cube.arr)['event'] == 'correct'
+    almost = apply_moves(cube, [s.plan[-1]]).arr.copy()
+    view = list(VISIBLE)
+    almost[view[9 + 2]] = 'D' if almost[view[9 + 2]] != 'D' else 'U'    # one front sticker reads wrong
+    said = []
+    for _ in range(2 * STEADY_FRAMES):
+        CLOCK[0] += 0.1
+        said.append(s.feed(_frame(almost), now=CLOCK[0]))
+    assert not s.solved and all(x['event'] != 'solved' for x in said)
+    assert any('check' in (x['message'] or '') for x in said)
+    st = _hold(s, apply_moves(cube, [s.plan[-1]]).arr)
+    assert st['event'] == 'solved'

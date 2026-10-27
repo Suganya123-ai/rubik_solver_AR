@@ -453,6 +453,13 @@ export class Flow {
       this.card('Got it', chip, m.title, `Following the cube the way you're holding it. ${m.how}${holdTip(t)}`, buttons, 'good');
       return;
     }
+    if (t.message && /^Nearly there/.test(t.message)) {
+      // The tracking thinks it's solved, but the camera doesn't see a solved cube yet: check before celebrating.
+      this.guide = null;
+      this.holdUntil = now + 2500;
+      this.card('Let me check', '', 'Is it solved?', t.message, buttons);
+      return;
+    }
     if (t.event === 'resynced') {
       this.holdUntil = now + 2500;
       this.card('Found you again', chip, m.title, `${t.message ?? ''} ${m.how}`, buttons, 'good');
