@@ -14,11 +14,15 @@ export class View {
   private vw = 1;
   /** Shown like a mirror (a camera facing the person); off for a camera looking at the table. */
   mirrored = true;
+  /** Turned half round (a camera upside down to the person, e.g. on a stand across the table). */
+  rotated = false;
+  private vh = 1;
 
   update(videoW: number, videoH: number, screenW: number, screenH: number): void {
     this.w = screenW;
     this.h = screenH;
     this.vw = videoW;
+    this.vh = videoH;
     this.scale = Math.max(screenW / videoW, screenH / videoH);
     this.ox = (screenW - videoW * this.scale) / 2;
     this.oy = (screenH - videoH * this.scale) / 2;
@@ -26,7 +30,9 @@ export class View {
 
   /** A point in video pixels -> screen (mirrored). */
   fromVideo([x, y]: Pt): Pt {
-    return [this.ox + (this.mirrored ? this.vw - x : x) * this.scale, this.oy + y * this.scale];
+    const mx = this.mirrored !== this.rotated ? this.vw - x : x;
+    const my = this.rotated ? this.vh - y : y;
+    return [this.ox + mx * this.scale, this.oy + my * this.scale];
   }
 
   /** A MediaPipe point (0..1 of the video) -> screen. */

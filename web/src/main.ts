@@ -117,12 +117,26 @@ function frame(now: number): void {
     ? 'Tilt the cube so you see three sides -- a corner pointing at the camera' : undefined);
 }
 
-// Mirroring: like a mirror for a camera facing the person (the laptop webcam); not for a camera
-// looking down at the table (the Living Lab's Lumens cameras). ?mirror=0/1 or the M key.
-function setMirror(fallback: boolean | null): void {
-  const q = new URLSearchParams(location.search).get('mirror');
-  view.mirrored = q !== null ? q !== '0' : fallback ?? true;
-  video.style.transform = view.mirrored ? 'scaleX(-1)' : 'none';
+// Mirroring: like a mirror (?mirror=0/1 or the M key).
+// The Lumens cameras on the Living Lab stand look down at the person from across the table: the
+// picture is turned half round (?rotate=0/1 or the R key) and the crop follows the cube (wide lens).
+function setMirror(lumens: boolean): void {
+  // Turned half round, the stand's camera looks at the person like a webcam from above: mirrored like one.
+  const q = new URLSearchParams(location.search);
+  view.mirrored = q.get('mirror') !== null ? q.get('mirror') !== '0' : true;
+  setRotated(q.get('rotate') !== null ? q.get('rotate') !== '0' : lumens);
+  link.follow = q.get('follow') !== null ? q.get('follow') !== '0' : lumens;
+}
+
+function setRotated(on: boolean): void {
+  view.rotated = on;
+  link.rotated = on;
+  applyVideoTransform();
+}
+
+function applyVideoTransform(): void {
+  const sx = view.mirrored !== view.rotated ? -1 : 1, sy = view.rotated ? -1 : 1;
+  video.style.transform = `scale(${sx}, ${sy})`;
 }
 
 let noteTimer = 0;
@@ -137,13 +151,19 @@ addEventListener('keydown', async (e) => {
   if (e.key === 'c' || e.key === 'C') {
     try {
       const name = await nextCamera(video);
-      setMirror(/lumens/i.test(name) ? false : true);
+      setMirror(/lumens/i.test(name));
       note(`Camera: ${name}`);
     } catch (err) { note(`Couldn't switch camera: ${(err as Error).message}`); }
   } else if (e.key === 'm' || e.key === 'M') {
     view.mirrored = !view.mirrored;
-    video.style.transform = view.mirrored ? 'scaleX(-1)' : 'none';
+    applyVideoTransform();
     note(view.mirrored ? 'Mirrored' : 'Not mirrored');
+  } else if (e.key === 'r' || e.key === 'R') {
+    setRotated(!view.rotated);
+    note(view.rotated ? 'Turned half round' : 'Upright');
+  } else if (e.key === 'f' || e.key === 'F') {
+    link.follow = !link.follow;
+    note(link.follow ? 'Zooming in on the cube' : 'Whole picture');
   }
 });
 
@@ -153,8 +173,8 @@ async function boot(): Promise<void> {
   hud.say('Starting the camera…');
   try {
     const name = await startCamera(video);
-    setMirror(/lumens/i.test(name) ? false : null);
-    note(`Camera: ${name}. C: next camera, M: mirror on/off.`);
+    setMirror(/lumens/i.test(name));
+    note(`Camera: ${name}. C: next camera, R: turn round, M: mirror, F: zoom on the cube.`);
   } catch (e) {
     hud.say(`Couldn't open the camera: ${(e as Error).message}`);
     return;

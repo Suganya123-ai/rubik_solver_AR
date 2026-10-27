@@ -33,7 +33,23 @@ const SLOW_WIDTH = 480;
 const SLOW_QUALITY = 0.65;
 const REPLY_TIMEOUT_MS = 2000;
 
+/** The part of the video sent: a crop that follows the cube (a wide camera such as the Living Lab's
+ *  makes the cube small), turned half round when the camera is upside down to the person. */
+type Region = { x: number; y: number; w: number; h: number };
+const FOLLOW_MARGIN = 2.4;      // crop side = cube size times this
+const MIN_CROP = 360;           // video pixels: never zoom in further than this
+const FORGET_CROP_MS = 1200;    // no cube this long: back to the whole picture
+
 export class ServerLink {
+  /** The camera is upside down to the person (it looks at them from the far side of a table). */
+  rotated = false;
+  /** Follow the cube with a crop (wide cameras). */
+  follow = false;
+  private region: Region | null = null;     // the crop sent with the frame in flight
+  private focus: Region | null = null;      // where the cube is (video pixels)
+  private focusSeen = 0;
+  private videoW = 1;
+  private videoH = 1;
   connected = false;
   latencyMs = 0;
   serverMs = 0;
@@ -77,9 +93,15 @@ export class ServerLink {
     this.inFlight = true;
     const slow = this.latencyMs > SLOW_MS;
     const width = slow ? SLOW_WIDTH : SEND_WIDTH;
+    this.videoW = video.videoWidth; this.videoH = video.videoHeight;
+    const r = this.cropRegion();
+    this.region = r;
     this.canvas.width = width;
-    this.canvas.height = Math.round((width * video.videoHeight) / video.videoWidth);
-    this.canvas.getContext('2d')!.drawImage(video, 0, 0, this.canvas.width, this.canvas.height);
+    this.canvas.height = Math.round((width * r.h) / r.w);
+    const g = this.canvas.getContext('2d')!;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    if (this.rotated) g.setTransform(-1, 0, 0, -1, this.canvas.width, this.canvas.height);
+    g.drawImage(video, r.x, r.y, r.w, r.h, 0, 0, this.canvas.width, this.canvas.height);
     this.canvas.toBlob(async (blob) => {
       if (!blob || !this.ws || this.ws.readyState !== WebSocket.OPEN) { this.inFlight = false; return; }
       const jpeg = new Uint8Array(await blob.arrayBuffer());
@@ -97,7 +119,48 @@ export class ServerLink {
     else this.queue.push(text);  // delivered as soon as the connection opens
   }
 
+  /** The region of the video to send: all of it, or a 4:3 crop around where the cube was. */
+  private cropRegion(): Region {
+    const W = this.videoW, H = this.videoH;
+    const all = { x: 0, y: 0, w: W, h: H };
+    if (!this.follow || !this.focus || performance.now() - this.focusSeen > FORGET_CROP_MS) return all;
+    const f = this.focus;
+    let h = Math.min(H, Math.max(MIN_CROP, Math.max(f.w, f.h) * FOLLOW_MARGIN));
+    let w = Math.min(W, h * 4 / 3);
+    h = Math.min(h, w * 3 / 4);
+    const cx = f.x + f.w / 2, cy = f.y + f.h / 2;
+    const x = Math.min(Math.max(cx - w / 2, 0), W - w), y = Math.min(Math.max(cy - h / 2, 0), H - h);
+    return { x, y, w, h };
+  }
+
+  /** Points in the sent picture -> video pixels (undoing the crop and the half turn). */
+  private toVideo(p: [number, number], frameW: number, frameH: number): [number, number] {
+    const r = this.region ?? { x: 0, y: 0, w: this.videoW, h: this.videoH };
+    let [u, v] = p;
+    if (this.rotated) { u = frameW - u; v = frameH - v; }
+    return [r.x + u * r.w / frameW, r.y + v * r.h / frameH];
+  }
+
   private receive(msg: Message): void {
+    if (msg.type === 'frame') {
+      const reply = msg as FrameReply;
+      // The overlays work in video pixels: the reply's points are mapped back from the crop, and its
+      // size becomes the video's (CubeView scales by width only).
+      if (reply.keypoints) {
+        reply.keypoints = reply.keypoints.map((p) => this.toVideo(p, reply.width, reply.height));
+        const seen = reply.keypoints.filter((_, i) => !reply.seen || reply.seen[i]);
+        const xs = seen.map((p) => p[0]), ys = seen.map((p) => p[1]);
+        const box = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+        const old = this.focus;
+        // move the crop only when the cube nears its edge or changes size a lot (a still crop: steadier)
+        const keep = old && Math.abs(box.x + box.w / 2 - (old.x + old.w / 2)) < old.w * 0.35 &&
+          Math.abs(box.y + box.h / 2 - (old.y + old.h / 2)) < old.h * 0.35 &&
+          Math.abs(Math.max(box.w, box.h) / Math.max(old.w, old.h) - 1) < 0.25;
+        if (!keep) this.focus = box;
+        this.focusSeen = performance.now();
+      }
+      reply.width = this.videoW; reply.height = this.videoH;
+    }
     if (msg.type === 'frame') {
       const now = performance.now();
       this.inFlight = false;
