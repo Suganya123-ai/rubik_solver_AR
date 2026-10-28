@@ -28,10 +28,10 @@ PRIOR = {0: 0.0, 1: 4.0, 2: 12.0}                         # prefer simpler expla
 EXPECTED_BONUS = 4.0                                      # the move we asked for costs nothing extra
 LOST_PER_STICKER = 22.0
 MARGIN = 6.0
-STEADY_FRAMES = 3      # and STEADY_SECONDS: time decides (at a normal 15 frames/s that's 6+ frames);
+STEADY_FRAMES = 2      # and STEADY_SECONDS: time decides (at a normal 15 frames/s that's 6+ frames);
                        # a slow link (e.g. a forwarded port, ~4 frames/s) only needs 3
-STEADY_SECONDS = 0.3      # and at least this long: a fast camera repeats frames
-MAX_MOVE = 0.03          # fraction of the cube's size per 1/15 s (more allowed between frames further apart)
+STEADY_SECONDS = 0.2      # and at least this long: a fast camera repeats frames
+MAX_MOVE = 0.045         # fraction of the cube's size per 1/15 s (more allowed between frames further apart)
 FRAME_GAP = 1 / 15
 LOST_AFTER_S = 3.0
 MAX_UNDO = 3              # more mistakes than this to undo: make a new plan instead

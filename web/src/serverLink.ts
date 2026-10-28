@@ -32,6 +32,10 @@ const SLOW_MS = 180;
 const SLOW_WIDTH = 480;
 const SLOW_QUALITY = 0.65;
 const REPLY_TIMEOUT_MS = 2000;
+// Frames out at once: on a slow link (a forwarded port: ~200 ms there and back) the next frame is
+// already on its way while the server works on one, so it gets twice as many (the server answers
+// them in order, so nothing builds up beyond this).
+const MAX_IN_FLIGHT = 2;
 
 /** The part of the video sent: a crop that follows the cube (a wide camera such as the Living Lab's
  *  makes the cube small), turned half round when the camera is upside down to the person. */
@@ -45,7 +49,8 @@ export class ServerLink {
   rotated = false;
   /** Follow the cube with a crop (wide cameras). */
   follow = false;
-  private region: Region | null = null;     // the crop sent with the frame in flight
+  private regions = new Map<number, Region>();  // the crop sent with each frame in flight, by frame id
+  private region: Region | null = null;     // ...the one of the reply being read
   private focus: Region | null = null;      // where the cube is (video pixels)
   private focusSeen = 0;
   private videoW = 1;
@@ -59,7 +64,9 @@ export class ServerLink {
   onConnection: (up: boolean) => void = () => {};
 
   private ws: WebSocket | null = null;
-  private inFlight = false;
+  private inFlight = 0;
+  private sentTimes = new Map<number, number>();
+  private encoding = false;
   private sentAt = 0;
   private frameId = 0;
   private replies: number[] = [];
@@ -72,13 +79,13 @@ export class ServerLink {
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       this.connected = true;
-      this.inFlight = false;
+      this.inFlight = 0;
       for (const command of this.queue.splice(0)) ws.send(command);
       this.onConnection(true);
     };
     ws.onclose = () => {
       this.connected = false;
-      this.inFlight = false;
+      this.inFlight = 0;
       this.onConnection(false);
       setTimeout(() => this.connect(), 1500);
     };
@@ -89,13 +96,16 @@ export class ServerLink {
   /** Call every animation frame: sends the current video frame if the server is free. */
   pump(video: HTMLVideoElement): void {
     if (!this.connected || !video.videoWidth) return;
-    if (this.inFlight && performance.now() - this.sentAt < REPLY_TIMEOUT_MS) return;
-    this.inFlight = true;
+    if (this.encoding) return;
+    if (this.inFlight >= MAX_IN_FLIGHT && performance.now() - this.sentAt < REPLY_TIMEOUT_MS) return;
+    if (this.inFlight >= MAX_IN_FLIGHT) { this.inFlight = 0; this.sentTimes.clear(); this.regions.clear(); }  // replies lost
+    // one frame at a time to the server while it's on this computer (it answers in ~40 ms anyway)
+    if (this.inFlight >= 1 && this.latencyMs < SLOW_MS / 2) return;
+    this.encoding = true;
     const slow = this.latencyMs > SLOW_MS;
     const width = slow ? SLOW_WIDTH : SEND_WIDTH;
     this.videoW = video.videoWidth; this.videoH = video.videoHeight;
     const r = this.cropRegion();
-    this.region = r;
     this.canvas.width = width;
     this.canvas.height = Math.round((width * r.h) / r.w);
     const g = this.canvas.getContext('2d')!;
@@ -103,12 +113,17 @@ export class ServerLink {
     if (this.rotated) g.setTransform(-1, 0, 0, -1, this.canvas.width, this.canvas.height);
     g.drawImage(video, r.x, r.y, r.w, r.h, 0, 0, this.canvas.width, this.canvas.height);
     this.canvas.toBlob(async (blob) => {
-      if (!blob || !this.ws || this.ws.readyState !== WebSocket.OPEN) { this.inFlight = false; return; }
+      this.encoding = false;
+      if (!blob || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
       const jpeg = new Uint8Array(await blob.arrayBuffer());
       const msg = new Uint8Array(4 + jpeg.length);
-      new DataView(msg.buffer).setUint32(0, ++this.frameId);
+      const id = ++this.frameId;
+      new DataView(msg.buffer).setUint32(0, id);
       msg.set(jpeg, 4);
       this.sentAt = performance.now();
+      this.sentTimes.set(id, this.sentAt);
+      this.regions.set(id, r);
+      this.inFlight++;
       this.ws.send(msg);
     }, 'image/jpeg', slow ? SLOW_QUALITY : JPEG_QUALITY);
   }
@@ -144,6 +159,8 @@ export class ServerLink {
   private receive(msg: Message): void {
     if (msg.type === 'frame') {
       const reply = msg as FrameReply;
+      this.region = this.regions.get(reply.frame) ?? null;
+      this.regions.delete(reply.frame);
       // The overlays work in video pixels: the reply's points are mapped back from the crop, and its
       // size becomes the video's (CubeView scales by width only).
       if (reply.keypoints) {
@@ -163,15 +180,17 @@ export class ServerLink {
     }
     if (msg.type === 'frame') {
       const now = performance.now();
-      this.inFlight = false;
-      this.latencyMs = now - this.sentAt;
+      const reply = msg as FrameReply;
+      this.inFlight = Math.max(0, this.inFlight - 1);
+      this.latencyMs = now - (this.sentTimes.get(reply.frame) ?? this.sentAt);
+      this.sentTimes.delete(reply.frame);
       this.serverMs = (msg as FrameReply).ms;
       this.replies.push(now);
       while (this.replies.length && now - this.replies[0] > 1000) this.replies.shift();
       this.repliesPerSecond = this.replies.length;
       this.onFrame(msg as FrameReply);
     } else {
-      if (msg.type === 'error') this.inFlight = false;
+      if (msg.type === 'error') this.inFlight = Math.max(0, this.inFlight - 1);
       this.onMessage(msg);
     }
   }
