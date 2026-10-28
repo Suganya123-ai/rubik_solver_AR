@@ -67,6 +67,7 @@ export class ServerLink {
   private inFlight = 0;
   private sentTimes = new Map<number, number>();
   private encoding = false;
+  private encodeStart = 0;
   private sentAt = 0;
   private frameId = 0;
   private replies: number[] = [];
@@ -96,12 +97,17 @@ export class ServerLink {
   /** Call every animation frame: sends the current video frame if the server is free. */
   pump(video: HTMLVideoElement): void {
     if (!this.connected || !video.videoWidth) return;
-    if (this.encoding) return;
-    if (this.inFlight >= MAX_IN_FLIGHT && performance.now() - this.sentAt < REPLY_TIMEOUT_MS) return;
-    if (this.inFlight >= MAX_IN_FLIGHT) { this.inFlight = 0; this.sentTimes.clear(); this.regions.clear(); }  // replies lost
-    // one frame at a time to the server while it's on this computer (it answers in ~40 ms anyway)
-    if (this.inFlight >= 1 && this.latencyMs < SLOW_MS / 2) return;
+    const now = performance.now();
+    if (this.encoding && now - this.encodeStart < REPLY_TIMEOUT_MS) return;
+    // one frame at a time while the server answers quickly (on this computer: ~40 ms), two on a slow link
+    const allowed = this.latencyMs < SLOW_MS / 2 ? 1 : MAX_IN_FLIGHT;
+    if (this.inFlight >= allowed) {
+      if (now - this.sentAt < REPLY_TIMEOUT_MS) return;
+      // no reply for 2 s (lost on a stalled link): stop waiting for it, or sending would stop for good
+      this.inFlight = 0; this.sentTimes.clear(); this.regions.clear();
+    }
     this.encoding = true;
+    this.encodeStart = now;
     const slow = this.latencyMs > SLOW_MS;
     const width = slow ? SLOW_WIDTH : SEND_WIDTH;
     this.videoW = video.videoWidth; this.videoH = video.videoHeight;
