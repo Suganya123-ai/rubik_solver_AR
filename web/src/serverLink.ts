@@ -36,6 +36,7 @@ const REPLY_TIMEOUT_MS = 2000;
 // already on its way while the server works on one, so it gets twice as many (the server answers
 // them in order, so nothing builds up beyond this).
 const MAX_IN_FLIGHT = 2;
+const QUIET_MS = 4000;      // no reply this long while frames are out: reconnect (same session)
 
 /** The part of the video sent: a crop that follows the cube (a wide camera such as the Living Lab's
  *  makes the cube small), turned half round when the camera is upside down to the person. */
@@ -74,30 +75,55 @@ export class ServerLink {
   private canvas = document.createElement('canvas');
   private queue: string[] = [];  // commands sent before the connection opened
 
+  /** This page's session: the server keeps the scan / solve under it while the page reconnects. */
+  private session = (crypto.randomUUID?.() ?? `${Date.now()}${Math.random()}`).replace(/[^A-Za-z0-9]/g, '').slice(0, 32);
+  private lastReply = 0;
+  /** Reconnections after the link went quiet (shown on screen while it happens). */
+  reconnecting = false;
+
   connect(): void {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/ws/live`);
+    const ws = new WebSocket(`${proto}://${location.host}/ws/live?session=${this.session}`);
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
+      if (this.ws !== ws) return;
+      this.reconnecting = false;
+      this.lastReply = performance.now();
       this.connected = true;
       this.inFlight = 0;
       for (const command of this.queue.splice(0)) ws.send(command);
       this.onConnection(true);
     };
     ws.onclose = () => {
+      if (this.ws !== ws) return;          // (an old connection given up on by the watchdog)
       this.connected = false;
       this.inFlight = 0;
       this.onConnection(false);
-      setTimeout(() => this.connect(), 1500);
+      setTimeout(() => this.connect(), 800);
     };
-    ws.onmessage = (event) => this.receive(JSON.parse(event.data as string) as Message);
+    ws.onmessage = (event) => { if (this.ws === ws) this.receive(JSON.parse(event.data as string) as Message); };
     this.ws = ws;
+  }
+
+  /** The link went quiet (frames sent, nothing back for a while: a stalled forwarded port can stay
+   *  "open" without carrying anything): drop it and connect again, carrying on with the same session. */
+  private watchdog(now: number): void {
+    if (!this.connected || this.inFlight === 0 || now - this.lastReply < QUIET_MS) return;
+    const old = this.ws;
+    this.ws = null;
+    this.connected = false;
+    this.inFlight = 0; this.sentTimes.clear(); this.regions.clear();
+    this.reconnecting = true;
+    this.onConnection(false);
+    try { old?.close(); } catch { /* already gone */ }
+    this.connect();
   }
 
   /** Call every animation frame: sends the current video frame if the server is free. */
   pump(video: HTMLVideoElement): void {
-    if (!this.connected || !video.videoWidth) return;
     const now = performance.now();
+    this.watchdog(now);
+    if (!this.connected || !video.videoWidth) return;
     if (this.encoding && now - this.encodeStart < REPLY_TIMEOUT_MS) return;
     // one frame at a time while the server answers quickly (on this computer: ~40 ms), two on a slow link
     const allowed = this.latencyMs < SLOW_MS / 2 ? 1 : MAX_IN_FLIGHT;
@@ -187,6 +213,7 @@ export class ServerLink {
     if (msg.type === 'frame') {
       const now = performance.now();
       const reply = msg as FrameReply;
+      this.lastReply = now;
       this.inFlight = Math.max(0, this.inFlight - 1);
       this.latencyMs = now - (this.sentTimes.get(reply.frame) ?? this.sentAt);
       this.sentTimes.delete(reply.frame);

@@ -64,7 +64,24 @@ function placeGhost(_corners: [number, number][] | null): void {
   ghostBox.style.transform = `translate(${x}px, ${y}px)`;
   ghostBox.style.width = ghostBox.style.height = `${size}px`;
 }
-link.onConnection = (up) => hud.say(up ? '' : 'Connecting to the vision server…');
+link.onConnection = (up) => hud.say(up ? '' : link.reconnecting
+  ? 'Reconnecting… (the connection went quiet; your solve carries on)' : 'Connecting to the vision server…');
+
+// The camera's stream can stop (a USB camera reset, a hub losing power): open it again.
+let cameraCheck = 0;
+async function keepCamera(now: number): Promise<void> {
+  if (now - cameraCheck < 1500) return;
+  cameraCheck = now;
+  const track = (video.srcObject as MediaStream | null)?.getVideoTracks()[0];
+  if (!track || track.readyState === 'live') return;
+  hud.say('The camera stopped -- starting it again…');
+  try {
+    await startCamera(video, track.getSettings().deviceId);
+    hud.say('');
+  } catch {
+    try { await startCamera(video); hud.say(''); } catch (e) { hud.say(`Couldn't restart the camera: ${(e as Error).message}`); }
+  }
+}
 
 /** True when one side fills the view and another hardly shows (the cube is held face-on):
  *  the stickers on the thin sides can't be read well, so moves are missed. */
@@ -89,6 +106,7 @@ function frame(now: number): void {
   view.update(video.videoWidth || 1280, video.videoHeight || 720, innerWidth, innerHeight);
   hands.update(video, now);
   link.pump(video);
+  void keepCamera(now);
 
   ctx.clearRect(0, 0, innerWidth, innerHeight);
   const alpha = cube.step(now);

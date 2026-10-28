@@ -1,5 +1,7 @@
 import asyncio
 import json
+import time
+import re
 import logging
 import os
 import threading
@@ -105,6 +107,27 @@ def live_page():
     return FileResponse(os.path.join(STATIC_DIR, 'live.html'))
 
 
+# Sessions kept after their connection drops, so a page that reconnects (a stalled forwarded port,
+# a network hiccup) carries on with the same scan or solve: ?session=<id chosen by the page>.
+_sessions = {}            # id -> (LiveClient, time it was last used)
+SESSION_KEEP_S = 15 * 60
+
+
+def _session_for(sid, make):
+    now = time.monotonic()
+    for old in [k for k, (_, t) in _sessions.items() if now - t > SESSION_KEEP_S]:
+        del _sessions[old]
+    if not sid or not re.fullmatch(r'[A-Za-z0-9_-]{8,64}', sid):
+        return make(), False
+    if sid in _sessions:
+        client = _sessions[sid][0]
+        _sessions[sid] = (client, now)
+        return client, True
+    client = make()
+    _sessions[sid] = (client, now)
+    return client, False
+
+
 @app.websocket('/ws/live')
 async def live_socket(ws: WebSocket):
     """Live camera loop for one device (browser or glasses). Binary messages
@@ -114,8 +137,10 @@ async def live_socket(ws: WebSocket):
     from vision.live_session import LiveClient, ProtocolError
 
     await ws.accept()
-    client = LiveClient(name=f'{ws.client.host}:{ws.client.port}' if ws.client else 'client')
-    log.info('%s connected', client.name)
+    name = f'{ws.client.host}:{ws.client.port}' if ws.client else 'client'
+    sid = ws.query_params.get('session')
+    client, resumed = _session_for(sid, lambda: LiveClient(name=name))
+    log.info('%s %s', client.name, 'reconnected: carrying on' if resumed else 'connected')
     sending = asyncio.Lock()   # the assistant's answers are sent from their own tasks
 
     async def send(reply):
@@ -157,6 +182,8 @@ async def live_socket(ws: WebSocket):
             await send(reply)
     except WebSocketDisconnect:
         pass
+    if sid in _sessions:
+        _sessions[sid] = (client, time.monotonic())
     log.info('%s disconnected', client.name)
 
 
